@@ -928,6 +928,7 @@ def main(_):
   if FLAGS.do_eval:
     eval_examples = processor.get_dev_examples(FLAGS.data_dir)
     num_actual_eval_examples = len(eval_examples)
+    FLAGS.eval_batch_size = FLAGS.train_batch_size
     if FLAGS.use_tpu:
       # TPU requires a fixed batch size for all batches, therefore the number
       # of examples must be a multiple of the batch size, or else examples
@@ -948,7 +949,7 @@ def main(_):
     if FLAGS.use_tpu:
         tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
     else:
-        # TODO: eval_batch_size is currently not used
+        # TODO: eval_batch_size is currently not used and is equal to train_batch_size
         tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.eval_batch_size, FLAGS.num_gpus)
 
     # This tells the estimator to run through the entire set.
@@ -978,6 +979,7 @@ def main(_):
   if FLAGS.do_predict:
     predict_examples = processor.get_test_examples(FLAGS.data_dir)
     num_actual_predict_examples = len(predict_examples)
+    FLAGS.predict_batch_size = FLAGS.train_batch_size
     if FLAGS.use_tpu:
       # TPU requires a fixed batch size for all batches, therefore the number
       # of examples must be a multiple of the batch size, or else examples
