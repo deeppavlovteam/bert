@@ -75,11 +75,11 @@ flags.DEFINE_bool(
     "do_predict", False,
     "Whether to run the model in inference mode on the test set.")
 
-flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
+flags.DEFINE_integer("train_batch_size", 32, "Per GPU (or total for TPU) batch size for training.")
 
-flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
+flags.DEFINE_integer("eval_batch_size", 8, "Per GPU (or total for TPU) batch size for eval.")
 
-flags.DEFINE_integer("predict_batch_size", 8, "Total batch size for predict.")
+flags.DEFINE_integer("predict_batch_size", 8, "Per GPU (or total for TPU) batch size for predict.")
 
 flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 
@@ -122,6 +122,10 @@ tf.flags.DEFINE_string("master", None, "[Optional] TensorFlow master URL.")
 flags.DEFINE_integer(
     "num_tpu_cores", 8,
     "Only used if `use_tpu` is True. Total number of TPU cores to use.")
+
+flags.DEFINE_integer(
+    "num_gpus", 1,
+    "Only used if `use_tpu` is False. Total number of GPUs to use.")
 
 
 class InputExample(object):
@@ -674,11 +678,17 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-          mode=mode,
-          loss=total_loss,
-          train_op=train_op,
-          scaffold_fn=scaffold_fn)
+      if use_tpu:
+        output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+            mode=mode,
+            loss=total_loss,
+            train_op=train_op,
+            scaffold_fn=scaffold_fn)
+      else:
+        output_spec = tf.estimator.EstimatorSpec(
+            mode=mode,
+            loss=total_loss,
+            train_op=train_op)
     elif mode == tf.estimator.ModeKeys.EVAL:
 
       def metric_fn(per_example_loss, label_ids, logits, is_real_example):
@@ -693,16 +703,26 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
       eval_metrics = (metric_fn,
                       [per_example_loss, label_ids, logits, is_real_example])
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-          mode=mode,
-          loss=total_loss,
-          eval_metrics=eval_metrics,
-          scaffold_fn=scaffold_fn)
+      if use_tpu:
+        output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+            mode=mode,
+            loss=total_loss,
+            eval_metrics=eval_metrics,
+            scaffold_fn=scaffold_fn)
+      else:
+        output_spec = tf.estimator.EstimatorSpec(
+            mode=mode,
+            loss=total_loss,
+            eval_metric_ops=metric_fn(per_example_loss, label_ids, logits, is_real_example)
+        )
     else:
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-          mode=mode,
-          predictions={"probabilities": probabilities},
-          scaffold_fn=scaffold_fn)
+      if use_tpu:
+        output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+            mode=mode,
+            predictions={"probabilities": probabilities},
+            scaffold_fn=scaffold_fn)
+      else:
+        output_spec = tf.estimator.EstimatorSpec(mode=mode, predictions={"probabilities": probabilities})
     return output_spec
 
   return model_fn
@@ -824,8 +844,9 @@ def main(_):
     tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
-  is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
-  run_config = tf.contrib.tpu.RunConfig(
+  if FLAGS.use_tpu:
+    is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+    run_config = tf.contrib.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
       model_dir=FLAGS.output_dir,
@@ -834,14 +855,29 @@ def main(_):
           iterations_per_loop=FLAGS.iterations_per_loop,
           num_shards=FLAGS.num_tpu_cores,
           per_host_input_for_training=is_per_host))
+  else:
+    sess_config = tf.ConfigProto(allow_soft_placement=True)
+    sess_config.gpu_options.allow_growth = True
+
+    distribution = tf.contrib.distribute.MirroredStrategy(num_gpus=FLAGS.num_gpus)
+    dist_config = tf.estimator.RunConfig(session_config=sess_config,
+                                         train_distribute=distribution,
+                                         eval_distribute=distribution,
+                                         model_dir=FLAGS.output_dir,
+                                         save_checkpoints_steps=FLAGS.save_checkpoints_steps)
 
   train_examples = None
   num_train_steps = None
   num_warmup_steps = None
   if FLAGS.do_train:
     train_examples = processor.get_train_examples(FLAGS.data_dir)
+
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
+
+    if not FLAGS.use_tpu:
+        num_train_steps = int(num_train_steps / FLAGS.num_gpus)
+
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
 
   model_fn = model_fn_builder(
@@ -854,15 +890,22 @@ def main(_):
       use_tpu=FLAGS.use_tpu,
       use_one_hot_embeddings=FLAGS.use_tpu)
 
-  # If TPU is not available, this will fall back to normal Estimator on CPU
-  # or GPU.
-  estimator = tf.contrib.tpu.TPUEstimator(
-      use_tpu=FLAGS.use_tpu,
-      model_fn=model_fn,
-      config=run_config,
-      train_batch_size=FLAGS.train_batch_size,
-      eval_batch_size=FLAGS.eval_batch_size,
-      predict_batch_size=FLAGS.predict_batch_size)
+  if FLAGS.use_tpu:
+    # If TPU is not available, this will fall back to normal Estimator on CPU
+    # or GPU.
+    estimator = tf.contrib.tpu.TPUEstimator(
+        use_tpu=FLAGS.use_tpu,
+        model_fn=model_fn,
+        config=run_config,
+        train_batch_size=FLAGS.train_batch_size,
+        eval_batch_size=FLAGS.eval_batch_size,
+        predict_batch_size=FLAGS.predict_batch_size)
+  else:
+    estimator = tf.estimator.Estimator(
+        model_fn=model_fn,
+        config=dist_config,
+        # TODO: check if we need these params
+        params={'batch_size': FLAGS.train_batch_size})
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
@@ -870,7 +913,10 @@ def main(_):
         train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num examples = %d", len(train_examples))
-    tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    if FLAGS.use_tpu:
+        tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    else:
+        tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.train_batch_size, FLAGS.num_gpus)
     tf.logging.info("  Num steps = %d", num_train_steps)
     train_input_fn = file_based_input_fn_builder(
         input_file=train_file,
@@ -899,7 +945,11 @@ def main(_):
     tf.logging.info("  Num examples = %d (%d actual, %d padding)",
                     len(eval_examples), num_actual_eval_examples,
                     len(eval_examples) - num_actual_eval_examples)
-    tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    if FLAGS.use_tpu:
+        tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    else:
+        # TODO: eval_batch_size is currently not used
+        tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.eval_batch_size, FLAGS.num_gpus)
 
     # This tells the estimator to run through the entire set.
     eval_steps = None
@@ -945,7 +995,10 @@ def main(_):
     tf.logging.info("  Num examples = %d (%d actual, %d padding)",
                     len(predict_examples), num_actual_predict_examples,
                     len(predict_examples) - num_actual_predict_examples)
-    tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+    if FLAGS.use_tpu:
+        tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+    else:
+        tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.predict_batch_size, FLAGS.num_gpus)
 
     predict_drop_remainder = True if FLAGS.use_tpu else False
     predict_input_fn = file_based_input_fn_builder(
