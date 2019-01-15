@@ -77,14 +77,18 @@ flags.DEFINE_bool(
 
 flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
 
-flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
+flags.DEFINE_integer("eval_batch_size", 20, "Total batch size for eval.")
 
-flags.DEFINE_integer("predict_batch_size", 8, "Total batch size for predict.")
+flags.DEFINE_integer("predict_batch_size", 20, "Total batch size for predict.")
 
 flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 
-flags.DEFINE_float("num_train_epochs", 3.0,
+flags.DEFINE_float("num_train_epochs", 10.0,
                    "Total number of training epochs to perform.")
+
+flags.DEFINE_float("num_valid_epochs", 1.0,
+                   "The number of training epochs after which to perform validation.")
+
 
 flags.DEFINE_float(
     "warmup_proportion", 0.1,
@@ -473,7 +477,8 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
   assert len(input_mask) == max_seq_length
   assert len(segment_ids) == max_seq_length
 
-  label_id = label_map[example.label]
+  # label_id = label_map[example.label]
+  label_id = example.label
   if ex_index < 5:
     tf.logging.info("*** Example ***")
     tf.logging.info("guid: %s" % (example.guid))
@@ -615,20 +620,29 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
       # I.e., 0.1 dropout
       output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
 
-    logits = tf.matmul(output_layer, output_weights, transpose_b=True)
-    logits = tf.nn.bias_add(logits, output_bias)
-    probabilities = tf.nn.softmax(logits, axis=-1)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)
+    # logits = tf.matmul(output_layer, output_weights, transpose_b=True)
+    # logits = tf.nn.bias_add(logits, output_bias)
+    # probabilities = tf.nn.softmax(logits, axis=-1)
+    # log_probs = tf.nn.log_softmax(logits, axis=-1)
+    #
+    # one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
+    #
+    # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
+    # loss = tf.reduce_mean(per_example_loss)
 
-    one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
+    # logits = tf.matmul(output_layer_a, tf.transpose(output_layer_b))
+    #logits = tf.reduce_sum(output_layer_a)
+    loss = tf.contrib.losses.metric_learning.npairs_loss(labels_a, output_layer_a, output_layer_b)
+    # output_layer_a = tf.math.l2_normalize(output_layer_a, axis=1)
+    # output_layer_b = tf.math.l2_normalize(output_layer_b, axis=1)
+    logits = tf.multiply(output_layer_a, output_layer_b)
+    logits = tf.reduce_sum(logits, 1)
 
-    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
-    loss = tf.reduce_mean(per_example_loss)
-
-    return (loss, per_example_loss, logits, probabilities)
+    # return (loss, per_example_loss, logits, probabilities)
+    return loss, logits
 
 
-def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
+def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
   """Returns `model_fn` closure for TPUEstimator."""
@@ -647,9 +661,15 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-    (total_loss, per_example_loss, logits, probabilities) = create_model(
-        bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
-        num_labels, use_one_hot_embeddings)
+    # (total_loss, per_example_loss, logits, probabilities) = create_npair_model(
+    #     bert_config, is_training,
+    #     input_ids_a, input_mask_a, segment_ids_a, label_ids_a,
+    #     input_ids_b, input_mask_b, segment_ids_b, label_ids_b,
+    #     num_labels, use_one_hot_embeddings)
+    total_loss, logits = create_model(
+        bert_config, is_training,
+        input_ids, input_mask, segment_ids, label_ids,
+        use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
     initialized_variable_names = {}
@@ -677,7 +697,6 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
@@ -686,26 +705,34 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
           loss=total_loss,
           train_op=train_op,
           scaffold_fn=scaffold_fn)
-    elif mode == tf.estimator.ModeKeys.EVAL:
-
-      def metric_fn(per_example_loss, label_ids, logits):
-        predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
-        accuracy = tf.metrics.accuracy(label_ids, predictions)
-        loss = tf.metrics.mean(per_example_loss)
+    # elif mode == tf.estimator.ModeKeys.EVAL:
+    else:
+      def metric_fn(loss, label_ids, logits):
+        predictions = tf.reshape(logits, [-1, 10])
+        labels = tf.to_int64(tf.reshape(label_ids, [-1, 10]))
+        r_at_1 = tf.metrics.recall_at_k(labels, predictions, 1, class_id=0)
+        r_at_2 = tf.metrics.recall_at_k(labels, predictions, 2, class_id=0)
+        r_at_5 = tf.metrics.recall_at_k(labels, predictions, 5, class_id=0)
         return {
-            "eval_accuracy": accuracy,
-            "eval_loss": loss,
+            "r@1": r_at_1,
+            "r@2": r_at_2,
+            "r@5": r_at_5
+            # "eval_loss": loss,
         }
 
-      eval_metrics = (metric_fn, [per_example_loss, label_ids, logits])
+      eval_metrics = (metric_fn, [total_loss, label_ids, logits])
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
           eval_metrics=eval_metrics,
           scaffold_fn=scaffold_fn)
-    else:
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-          mode=mode, predictions=probabilities, scaffold_fn=scaffold_fn)
+    # else:
+    #   # hook = tf.train.LoggingTensorHook({'var is:\n': logits}, every_n_iter=1)
+    #   # output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+    #   #     mode=mode, predictions=logits, scaffold_fn=scaffold_fn, prediction_hooks=[hook])
+    #   predictions = tf.reshape(logits, [-1, 10])
+    #   output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+    #       mode=mode, predictions=predictions, scaffold_fn=scaffold_fn)
     return output_spec
 
   return model_fn
