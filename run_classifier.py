@@ -346,6 +346,9 @@ class UbuntuV2Processor(DataProcessor):
   def get_eval_labels(self):
     return list(range(10))
 
+  def get_test_labels(self):
+    return list(range(10))
+
   def _create_examples(self, lines, set_type):
     """Creates examples for the training and dev sets."""
     examples = []
@@ -604,16 +607,19 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  output_layer = model.get_pooled_output()
+  # output_layer = model.get_pooled_output()
+  output_layer = model.get_sequence_output()
 
-  hidden_size = output_layer.shape[-1].value
 
-  output_weights = tf.get_variable(
-      "output_weights", [num_labels, hidden_size],
-      initializer=tf.truncated_normal_initializer(stddev=0.02))
 
-  output_bias = tf.get_variable(
-      "output_bias", [num_labels], initializer=tf.zeros_initializer())
+  # hidden_size = output_layer.shape[-1].value
+  #
+  # output_weights = tf.get_variable(
+  #     "output_weights", [num_labels, hidden_size],
+  #     initializer=tf.truncated_normal_initializer(stddev=0.02))
+  #
+  # output_bias = tf.get_variable(
+  #     "output_bias", [num_labels], initializer=tf.zeros_initializer())
 
   with tf.variable_scope("loss"):
     if is_training:
@@ -630,12 +636,10 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
     # loss = tf.reduce_mean(per_example_loss)
 
-    # logits = tf.matmul(output_layer_a, tf.transpose(output_layer_b))
-    #logits = tf.reduce_sum(output_layer_a)
-    loss = tf.contrib.losses.metric_learning.npairs_loss(labels_a, output_layer_a, output_layer_b)
+    loss = tf.contrib.losses.metric_learning.npairs_loss(labels, output_layer, output_layer)
     # output_layer_a = tf.math.l2_normalize(output_layer_a, axis=1)
     # output_layer_b = tf.math.l2_normalize(output_layer_b, axis=1)
-    logits = tf.multiply(output_layer_a, output_layer_b)
+    logits = tf.multiply(output_layer, output_layer)
     logits = tf.reduce_sum(logits, 1)
 
     # return (loss, per_example_loss, logits, probabilities)
