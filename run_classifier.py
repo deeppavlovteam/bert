@@ -810,8 +810,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
   return features
 
 
-def main(_
-         ):
+def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
 
   processors = {
