@@ -86,7 +86,7 @@ flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 flags.DEFINE_float("num_train_epochs", 10.0,
                    "Total number of training epochs to perform.")
 
-flags.DEFINE_float("num_valid_epochs", 1.0,
+flags.DEFINE_float("num_eval_epochs", 1.0,
                    "The number of training epochs after which to perform validation.")
 
 
@@ -152,11 +152,17 @@ class InputExample(object):
 class InputFeatures(object):
   """A single set of features of data."""
 
-  def __init__(self, input_ids, input_mask, segment_ids, label_id):
-    self.input_ids = input_ids
-    self.input_mask = input_mask
-    self.segment_ids = segment_ids
-    self.label_id = label_id
+  def __init__(self,
+               input_ids_a, input_mask_a, segment_ids_a, label_id_a,
+               input_ids_b, input_mask_b, segment_ids_b, label_id_b):
+    self.input_ids_a = input_ids_a
+    self.input_mask_a = input_mask_a
+    self.segment_ids_a = segment_ids_a
+    self.label_id_a = label_id_a
+    self.input_ids_b = input_ids_b
+    self.input_mask_b = input_mask_b
+    self.segment_ids_b = segment_ids_b
+    self.label_id_b = label_id_b
 
 
 class DataProcessor(object):
@@ -407,12 +413,34 @@ class ColaProcessor(DataProcessor):
     return examples
 
 
+def convert_paired_example(ex_index, example, label_list, max_seq_length,
+                           tokenizer):
+    example_a = InputExample(guid=example.guid, text_a=example.text_a, text_b=None, label=example.label)
+    example_b = InputExample(guid=example.guid, text_a=example.text_b, text_b=None, label=example.label)
+    input_ids_a, input_mask_a, segment_ids_a, label_id_a =\
+      convert_single_example(ex_index, example_a, label_list, max_seq_length, tokenizer)
+    input_ids_b, input_mask_b, segment_ids_b, label_id_b =\
+      convert_single_example(ex_index, example_b, label_list, max_seq_length, tokenizer)
+
+    feature = InputFeatures(
+      input_ids_a=input_ids_a,
+      input_mask_a=input_mask_a,
+      segment_ids_a=segment_ids_a,
+      label_id_a=label_id_a,
+      input_ids_b=input_ids_b,
+      input_mask_b=input_mask_b,
+      segment_ids_b=segment_ids_b,
+      label_id_b=label_id_b)
+
+    return feature
+
+
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
   """Converts a single `InputExample` into a single `InputFeatures`."""
-  label_map = {}
-  for (i, label) in enumerate(label_list):
-    label_map[label] = i
+  # label_map = {}
+  # for (i, label) in enumerate(label_list):
+  #   label_map[label] = i
 
   tokens_a = tokenizer.tokenize(example.text_a)
   tokens_b = None
@@ -491,26 +519,20 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
     tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
     tf.logging.info("label: %s (id = %d)" % (example.label, label_id))
-
-  feature = InputFeatures(
-      input_ids=input_ids,
-      input_mask=input_mask,
-      segment_ids=segment_ids,
-      label_id=label_id)
-  return feature
+  return input_ids, input_mask, segment_ids, label_id
 
 
 def file_based_convert_examples_to_features(
     examples, label_list, max_seq_length, tokenizer, output_file):
   """Convert a set of `InputExample`s to a TFRecord file."""
 
-  writer = tf.python_io.TFRecordWriter(output_file)
+  writer_a = tf.python_io.TFRecordWriter(output_file)
 
   for (ex_index, example) in enumerate(examples):
     if ex_index % 10000 == 0:
       tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-    feature = convert_single_example(ex_index, example, label_list,
+    feature = convert_paired_example(ex_index, example, label_list,
                                      max_seq_length, tokenizer)
 
     def create_int_feature(values):
@@ -518,29 +540,43 @@ def file_based_convert_examples_to_features(
       return f
 
     features = collections.OrderedDict()
-    features["input_ids"] = create_int_feature(feature.input_ids)
-    features["input_mask"] = create_int_feature(feature.input_mask)
-    features["segment_ids"] = create_int_feature(feature.segment_ids)
-    features["label_ids"] = create_int_feature([feature.label_id])
+    features["input_ids_a"] = create_int_feature(feature.input_ids_a)
+    features["input_mask_a"] = create_int_feature(feature.input_mask_a)
+    features["segment_ids_a"] = create_int_feature(feature.segment_ids_a)
+    features["label_ids_a"] = create_int_feature([feature.label_id_a])
+    features["input_ids_b"] = create_int_feature(feature.input_ids_b)
+    features["input_mask_b"] = create_int_feature(feature.input_mask_b)
+    features["segment_ids_b"] = create_int_feature(feature.segment_ids_b)
+    features["label_ids_b"] = create_int_feature([feature.label_id_b])
 
-    tf_example = tf.train.Example(features=tf.train.Features(feature=features))
-    writer.write(tf_example.SerializeToString())
+    tf_example_a = tf.train.Example(features=tf.train.Features(feature=features))
+    writer_a.write(tf_example_a.SerializeToString())
 
 
 def file_based_input_fn_builder(input_file, seq_length, is_training,
                                 drop_remainder):
   """Creates an `input_fn` closure to be passed to TPUEstimator."""
 
-  name_to_features = {
-      "input_ids": tf.FixedLenFeature([seq_length], tf.int64),
-      "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
-      "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
-      "label_ids": tf.FixedLenFeature([], tf.int64),
+  name_to_features_a = {
+      "input_ids_a": tf.FixedLenFeature([seq_length], tf.int64),
+      "input_mask_a": tf.FixedLenFeature([seq_length], tf.int64),
+      "segment_ids_a": tf.FixedLenFeature([seq_length], tf.int64),
+      "label_ids_a": tf.FixedLenFeature([], tf.int64),
   }
 
-  def _decode_record(record, name_to_features):
+  name_to_features_b = {
+      "input_ids_b": tf.FixedLenFeature([seq_length], tf.int64),
+      "input_mask_b": tf.FixedLenFeature([seq_length], tf.int64),
+      "segment_ids_b": tf.FixedLenFeature([seq_length], tf.int64),
+      "label_ids_b": tf.FixedLenFeature([], tf.int64),
+  }
+
+  def _decode_record(record, name_to_features_a, name_to_features_b):
     """Decodes a record to a TensorFlow example."""
-    example = tf.parse_single_example(record, name_to_features)
+    example = tf.parse_single_example(record, name_to_features_a)
+    example_b = tf.parse_single_example(record, name_to_features_b)
+
+    example.update(example_b)
 
     # tf.Example only supports tf.int64, but the TPU only supports tf.int32.
     # So cast all int64 to int32.
@@ -565,7 +601,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
 
     d = d.apply(
         tf.contrib.data.map_and_batch(
-            lambda record: _decode_record(record, name_to_features),
+            lambda record: _decode_record(record, name_to_features_a, name_to_features_b),
             batch_size=batch_size,
             drop_remainder=drop_remainder))
 
@@ -591,41 +627,50 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
       tokens_b.pop()
 
 
-def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
-                 labels, use_one_hot_embeddings):
+def create_npair_model(bert_config, is_training,
+                 input_ids_a, input_mask_a, segment_ids_a, labels_a,
+                 input_ids_b, input_mask_b, segment_ids_b, labels_b,
+                 use_one_hot_embeddings):
   """Creates a classification model."""
-  model = modeling.BertModel(
-      config=bert_config,
-      is_training=is_training,
-      input_ids=input_ids,
-      input_mask=input_mask,
-      token_type_ids=segment_ids,
-      use_one_hot_embeddings=use_one_hot_embeddings)
+  with tf.variable_scope("model"):
+
+      model_a = modeling.BertModel(
+          config=bert_config,
+          is_training=is_training,
+          input_ids=input_ids_a,
+          input_mask=input_mask_a,
+          token_type_ids=segment_ids_a,
+          use_one_hot_embeddings=use_one_hot_embeddings)
+
+  with tf.variable_scope("model", reuse=True):
+
+      model_b = modeling.BertModel(
+          config=bert_config,
+          is_training=is_training,
+          input_ids=input_ids_b,
+          input_mask=input_mask_b,
+          token_type_ids=segment_ids_b,
+          use_one_hot_embeddings=use_one_hot_embeddings)
+
+  # model_a = modeling.BertModel(
+  #     config=bert_config,
+  #     is_training=is_training,
+  #     input_ids=input_ids_a,
+  #     input_mask=input_mask_a,
+  #     token_type_ids=segment_ids_a,
+  #     use_one_hot_embeddings=use_one_hot_embeddings)
+
+
 
   # In the demo, we are doing a simple classification task on the entire
   # segment.
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  # output_layer = model.get_pooled_output()
-  output_layer = model.get_sequence_output()
+  output_layer_a = model_a.get_pooled_output()
+  output_layer_b = model_b.get_pooled_output()
 
-  hs = output_layer.shape[-1].value
-  output_layer = output_layer[:, 1:, :]
-  ones = tf.ones_like(output_layer, dtype='int32')
-  zeros = tf.zeros_like(output_layer, dtype='int32')
-  mask = segment_ids[:, 1:]
-  mask = tf.expand_dims(mask, -1)
-  mask = tf.tile(mask, [1, 1, hs])
-  mask_a = tf.equal(mask, zeros)
-  output_layer_a = tf.boolean_mask(output_layer, mask_a)
-  output_layer_a = tf.layers.max_pooling1d(output_layer_a, pool_size=output_layer_a.shape[1], strides=1)
-  output_layer_a = tf.squeeze(output_layer_a, axis=1)
-  mask_b = tf.equal(mask, ones)
-  output_layer_b = tf.boolean_mask(output_layer, mask_b)
-  output_layer_b = tf.layers.max_pooling1d(output_layer_b, pool_size=output_layer_b.shape[1], strides=1)
-  output_layer_b = tf.squeeze(output_layer_b, axis=1)
-
+  # hidden_size = output_layer.shape[-1].value
   #
   # output_weights = tf.get_variable(
   #     "output_weights", [num_labels, hidden_size],
@@ -650,7 +695,9 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
     # loss = tf.reduce_mean(per_example_loss)
 
-    loss = tf.contrib.losses.metric_learning.npairs_loss(labels, output_layer_a, output_layer_b)
+    # logits = tf.matmul(output_layer_a, tf.transpose(output_layer_b))
+    #logits = tf.reduce_sum(output_layer_a)
+    loss = tf.contrib.losses.metric_learning.npairs_loss(labels_a, output_layer_a, output_layer_b)
     # output_layer_a = tf.math.l2_normalize(output_layer_a, axis=1)
     # output_layer_b = tf.math.l2_normalize(output_layer_b, axis=1)
     logits = tf.multiply(output_layer_a, output_layer_b)
@@ -672,10 +719,14 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     for name in sorted(features.keys()):
       tf.logging.info("  name = %s, shape = %s" % (name, features[name].shape))
 
-    input_ids = features["input_ids"]
-    input_mask = features["input_mask"]
-    segment_ids = features["segment_ids"]
-    label_ids = features["label_ids"]
+    input_ids_a = features["input_ids_a"]
+    input_mask_a = features["input_mask_a"]
+    segment_ids_a = features["segment_ids_a"]
+    label_ids_a = features["label_ids_a"]
+    input_ids_b = features["input_ids_b"]
+    input_mask_b = features["input_mask_b"]
+    segment_ids_b = features["segment_ids_b"]
+    label_ids_b = features["label_ids_b"]
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
@@ -684,9 +735,10 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
     #     input_ids_a, input_mask_a, segment_ids_a, label_ids_a,
     #     input_ids_b, input_mask_b, segment_ids_b, label_ids_b,
     #     num_labels, use_one_hot_embeddings)
-    total_loss, logits = create_model(
+    total_loss, logits = create_npair_model(
         bert_config, is_training,
-        input_ids, input_mask, segment_ids, label_ids,
+        input_ids_a, input_mask_a, segment_ids_a, label_ids_a,
+        input_ids_b, input_mask_b, segment_ids_b, label_ids_b,
         use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
@@ -738,7 +790,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             # "eval_loss": loss,
         }
 
-      eval_metrics = (metric_fn, [total_loss, label_ids, logits])
+      eval_metrics = (metric_fn, [total_loss, label_ids_a, logits])
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
@@ -887,7 +939,7 @@ def main(_):
     train_examples = processor.get_train_examples(FLAGS.data_dir)
     num_train_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
-    num_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.num_valid_epochs)
+    num_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.num_eval_epochs)
 
   model_fn = model_fn_builder(
       bert_config=bert_config,
@@ -942,13 +994,13 @@ def main(_):
         is_training=False,
         drop_remainder=eval_drop_remainder)
 
-    for i in range(int(FLAGS.num_train_epochs / FLAGS.num_valid_epochs)):
+    for i in range(int(FLAGS.num_train_epochs / FLAGS.num_eval_epochs)):
       if FLAGS.do_train:
         tf.logging.info("***** Running training *****")
         tf.logging.info("  Num examples = %d", len(train_examples))
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
         tf.logging.info("  Num steps = %d", num_steps)
-        estimator.train(input_fn=train_input_fn, max_steps=num_steps)
+        estimator.train(input_fn=train_input_fn, steps=num_steps)
 
       if FLAGS.do_eval:
         tf.logging.info("***** Running evaluation *****")
@@ -1014,11 +1066,10 @@ def main(_):
         tf.logging.info("  %s = %s", key, str(result[key]))
         writer.write("%s = %s\n" % (key, str(result[key])))
 
-
 if __name__ == "__main__":
   flags.mark_flag_as_required("data_dir")
   flags.mark_flag_as_required("task_name")
   flags.mark_flag_as_required("vocab_file")
   flags.mark_flag_as_required("bert_config_file")
   flags.mark_flag_as_required("output_dir")
-  tf.app.run()
+  tf.app.run(main=main)
