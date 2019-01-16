@@ -518,7 +518,7 @@ def main(_):
         tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
     else:
         # TODO: eval_batch_size is currently not used and is equal to train_batch_size
-        tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.train_batch_size, FLAGS.num_gpus)
+        tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.eval_batch_size, FLAGS.num_gpus)
 
     eval_input_fn = input_fn_builder(
         input_files=input_files,
