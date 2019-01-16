@@ -109,10 +109,12 @@ flags.DEFINE_integer(
     "num_gpus", 1,
     "Only used if `use_tpu` is False. Total number of GPUs to use.")
 
+flags.DEFINE_bool("train_only_embeddings", False, "Whether to train only embeddings variable.")
+
 
 def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings):
+                     use_one_hot_embeddings, train_only_embeddings):
   """Returns `model_fn` closure for TPUEstimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -178,8 +180,10 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
+      vars_to_train = model.embedding_table if train_only_embeddings else None
       train_op = optimization.create_optimizer(
-          total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+          total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu,
+          vars_to_train)
 
       if use_tpu:
         output_spec = tf.contrib.tpu.TPUEstimatorSpec(
@@ -479,7 +483,8 @@ def main(_):
       num_train_steps=FLAGS.num_train_steps,
       num_warmup_steps=FLAGS.num_warmup_steps,
       use_tpu=FLAGS.use_tpu,
-      use_one_hot_embeddings=FLAGS.use_tpu)
+      use_one_hot_embeddings=FLAGS.use_tpu,
+      train_only_embeddings=FLAGS.train_only_embeddings)
 
   if FLAGS.use_tpu:
     # If TPU is not available, this will fall back to normal Estimator on CPU
