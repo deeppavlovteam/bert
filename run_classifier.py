@@ -86,7 +86,7 @@ flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
 flags.DEFINE_float("num_train_epochs", 10.0,
                    "Total number of training epochs to perform.")
 
-flags.DEFINE_float("num_valid_epochs", 1.0,
+flags.DEFINE_float("num_eval_epochs", 1.0,
                    "The number of training epochs after which to perform validation.")
 
 
@@ -612,18 +612,23 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
   hs = output_layer.shape[-1].value
   output_layer = output_layer[:, 1:, :]
+  minimum = tf.reduce_min(output_layer)
   ones = tf.ones_like(output_layer, dtype='int32')
   zeros = tf.zeros_like(output_layer, dtype='int32')
   mask = segment_ids[:, 1:]
   mask = tf.expand_dims(mask, -1)
   mask = tf.tile(mask, [1, 1, hs])
   mask_a = tf.equal(mask, zeros)
-  output_layer_a = tf.boolean_mask(output_layer, mask_a)
-  output_layer_a = tf.layers.max_pooling1d(output_layer_a, pool_size=output_layer_a.shape[1], strides=1)
+  mask_a = tf.to_float(mask_a)
+  add_a = tf.scalar_mul(minimum, mask_a)
+  output_layer_a = tf.add(output_layer, add_a)
+  output_layer_a = tf.layers.max_pooling1d(output_layer_a, pool_size=(output_layer_a.shape[1],), strides=(1,))
   output_layer_a = tf.squeeze(output_layer_a, axis=1)
   mask_b = tf.equal(mask, ones)
-  output_layer_b = tf.boolean_mask(output_layer, mask_b)
-  output_layer_b = tf.layers.max_pooling1d(output_layer_b, pool_size=output_layer_b.shape[1], strides=1)
+  mask_b = tf.to_float(mask_b)
+  add_b = tf.scalar_mul(minimum, mask_b)
+  output_layer_b = tf.add(output_layer, add_b)
+  output_layer_b = tf.layers.max_pooling1d(output_layer_b, pool_size=(output_layer_b.shape[1],), strides=(1,))
   output_layer_b = tf.squeeze(output_layer_b, axis=1)
 
   #
@@ -887,7 +892,7 @@ def main(_):
     train_examples = processor.get_train_examples(FLAGS.data_dir)
     num_train_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
-    num_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.num_valid_epochs)
+    num_steps = int(len(train_examples) / FLAGS.train_batch_size * FLAGS.num_eval_epochs)
 
   model_fn = model_fn_builder(
       bert_config=bert_config,
@@ -942,13 +947,13 @@ def main(_):
         is_training=False,
         drop_remainder=eval_drop_remainder)
 
-    for i in range(int(FLAGS.num_train_epochs / FLAGS.num_valid_epochs)):
+    for i in range(int(FLAGS.num_train_epochs / FLAGS.num_eval_epochs)):
       if FLAGS.do_train:
         tf.logging.info("***** Running training *****")
         tf.logging.info("  Num examples = %d", len(train_examples))
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
         tf.logging.info("  Num steps = %d", num_steps)
-        estimator.train(input_fn=train_input_fn, max_steps=num_steps)
+        estimator.train(input_fn=train_input_fn, steps=num_steps)
 
       if FLAGS.do_eval:
         tf.logging.info("***** Running evaluation *****")
