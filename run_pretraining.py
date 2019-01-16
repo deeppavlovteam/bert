@@ -180,7 +180,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-      vars_to_train = model.embedding_table if train_only_embeddings else None
+      vars_to_train = [model.embedding_table] if train_only_embeddings else None
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu,
           vars_to_train)
@@ -454,7 +454,7 @@ def main(_):
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
 
-  if FLAGS.use_tpu:
+  if FLAGS.use_tpu or FLAGS.num_gpus == 1:
     is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
     run_config = tf.contrib.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
@@ -486,7 +486,7 @@ def main(_):
       use_one_hot_embeddings=FLAGS.use_tpu,
       train_only_embeddings=FLAGS.train_only_embeddings)
 
-  if FLAGS.use_tpu:
+  if FLAGS.use_tpu or FLAGS.num_gpus == 1:
     # If TPU is not available, this will fall back to normal Estimator on CPU
     # or GPU.
     estimator = tf.contrib.tpu.TPUEstimator(
@@ -494,8 +494,7 @@ def main(_):
         model_fn=model_fn,
         config=run_config,
         train_batch_size=FLAGS.train_batch_size,
-        eval_batch_size=FLAGS.eval_batch_size,
-        predict_batch_size=FLAGS.predict_batch_size)
+        eval_batch_size=FLAGS.eval_batch_size)
   else:
     estimator = tf.estimator.Estimator(
         model_fn=model_fn,
@@ -505,7 +504,7 @@ def main(_):
 
   if FLAGS.do_train:
     tf.logging.info("***** Running training *****")
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
     else:
         tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.train_batch_size, FLAGS.num_gpus)
@@ -519,7 +518,7 @@ def main(_):
   if FLAGS.do_eval:
     tf.logging.info("***** Running evaluation *****")
     FLAGS.eval_batch_size = FLAGS.train_batch_size
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
         tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
     else:
         # TODO: eval_batch_size is currently not used and is equal to train_batch_size
