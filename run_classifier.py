@@ -592,7 +592,7 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
-                 labels, num_labels, use_one_hot_embeddings):
+                 labels, use_one_hot_embeddings):
   """Creates a classification model."""
   model = modeling.BertModel(
       config=bert_config,
@@ -610,9 +610,22 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   # output_layer = model.get_pooled_output()
   output_layer = model.get_sequence_output()
 
+  hs = output_layer.shape[-1].value
+  output_layer = output_layer[:, 1:, :]
+  ones = tf.ones_like(output_layer, dtype='int32')
+  zeros = tf.zeros_like(output_layer, dtype='int32')
+  mask = segment_ids[:, 1:]
+  mask = tf.expand_dims(mask, -1)
+  mask = tf.tile(mask, [1, 1, hs])
+  mask_a = tf.equal(mask, zeros)
+  output_layer_a = tf.boolean_mask(output_layer, mask_a)
+  output_layer_a = tf.layers.max_pooling1d(output_layer_a, pool_size=output_layer_a.shape[1], strides=1)
+  output_layer_a = tf.squeeze(output_layer_a, axis=1)
+  mask_b = tf.equal(mask, ones)
+  output_layer_b = tf.boolean_mask(output_layer, mask_b)
+  output_layer_b = tf.layers.max_pooling1d(output_layer_b, pool_size=output_layer_b.shape[1], strides=1)
+  output_layer_b = tf.squeeze(output_layer_b, axis=1)
 
-
-  # hidden_size = output_layer.shape[-1].value
   #
   # output_weights = tf.get_variable(
   #     "output_weights", [num_labels, hidden_size],
@@ -624,7 +637,8 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   with tf.variable_scope("loss"):
     if is_training:
       # I.e., 0.1 dropout
-      output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
+      output_layer_a = tf.nn.dropout(output_layer_a, keep_prob=0.9)
+      output_layer_b = tf.nn.dropout(output_layer_b, keep_prob=0.9)
 
     # logits = tf.matmul(output_layer, output_weights, transpose_b=True)
     # logits = tf.nn.bias_add(logits, output_bias)
@@ -636,10 +650,10 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
     # loss = tf.reduce_mean(per_example_loss)
 
-    loss = tf.contrib.losses.metric_learning.npairs_loss(labels, output_layer, output_layer)
+    loss = tf.contrib.losses.metric_learning.npairs_loss(labels, output_layer_a, output_layer_b)
     # output_layer_a = tf.math.l2_normalize(output_layer_a, axis=1)
     # output_layer_b = tf.math.l2_normalize(output_layer_b, axis=1)
-    logits = tf.multiply(output_layer, output_layer)
+    logits = tf.multiply(output_layer_a, output_layer_b)
     logits = tf.reduce_sum(logits, 1)
 
     # return (loss, per_example_loss, logits, probabilities)
