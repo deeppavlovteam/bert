@@ -182,7 +182,10 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-      vars_to_train = [model.embedding_table] if train_only_embeddings else None
+      with tf.variable_scope("cls/predictions", reuse=tf.AUTO_REUSE):
+        if train_only_embeddings:
+          output_bias = tf.get_variable("output_bias", shape=[bert_config.vocab_size])
+      vars_to_train = [model.embedding_table, output_bias] if train_only_embeddings else None
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu,
           vars_to_train)
