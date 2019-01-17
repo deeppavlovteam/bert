@@ -541,8 +541,7 @@ def main(_):
   for i in range(n_evaluations):
     train_steps_per_epoch = FLAGS.evaluate_every or FLAGS.num_train_steps
     if i == n_evaluations - 1 and has_tail:
-      tail_size = FLAGS.num_train_steps % FLAGS.evaluate_every
-      train_steps_per_epoch = int(FLAGS.num_train_steps * tail_size)
+        train_steps_per_epoch = FLAGS.num_train_steps % FLAGS.evaluate_every
 
     if FLAGS.do_train:
       estimator.train(input_fn=train_input_fn, max_steps=train_steps_per_epoch)
