@@ -71,6 +71,8 @@ flags.DEFINE_integer("num_train_steps", 100000, "Number of training steps.")
 
 flags.DEFINE_integer("num_warmup_steps", 10000, "Number of warmup steps.")
 
+flags.DEFINE_integer("evaluate_every", None, "Evaluate every N steps")
+
 flags.DEFINE_integer("save_checkpoints_steps", 1000,
                      "How often to save the model checkpoint.")
 
@@ -512,7 +514,6 @@ def main(_):
         max_seq_length=FLAGS.max_seq_length,
         max_predictions_per_seq=FLAGS.max_predictions_per_seq,
         is_training=True)
-    estimator.train(input_fn=train_input_fn, max_steps=FLAGS.num_train_steps)
 
   if FLAGS.do_eval:
     tf.logging.info("***** Running evaluation *****")
@@ -529,15 +530,33 @@ def main(_):
         max_predictions_per_seq=FLAGS.max_predictions_per_seq,
         is_training=False)
 
-    result = estimator.evaluate(
-        input_fn=eval_input_fn, steps=FLAGS.max_eval_steps)
+  n_evaluations = 1
+  has_tail = False
+  if FLAGS.evaluate_every is not None:
+    n_evaluations = int(FLAGS.num_train_steps // FLAGS.evaluate_every)
+    if FLAGS.num_train_steps % FLAGS.evaluate_every != 0:
+        n_evaluations += 1
+        has_tail = True
 
-    output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
-    with tf.gfile.GFile(output_eval_file, "w") as writer:
-      tf.logging.info("***** Eval results *****")
-      for key in sorted(result.keys()):
-        tf.logging.info("  %s = %s", key, str(result[key]))
-        writer.write("%s = %s\n" % (key, str(result[key])))
+  for i in range(n_evaluations):
+    train_steps_per_epoch = FLAGS.evaluate_every or FLAGS.num_train_steps
+    if i == n_evaluations - 1 and has_tail:
+      tail_size = FLAGS.num_train_steps % FLAGS.evaluate_every
+      train_steps_per_epoch = int(FLAGS.num_train_steps * tail_size)
+
+    if FLAGS.do_train:
+      estimator.train(input_fn=train_input_fn, max_steps=train_steps_per_epoch)
+
+    if FLAGS.do_eval:
+      result = estimator.evaluate(
+          input_fn=eval_input_fn, steps=FLAGS.max_eval_steps)
+
+      output_eval_file = os.path.join(FLAGS.output_dir, "eval_results_%s.txt" % i)
+      with tf.gfile.GFile(output_eval_file, "w") as writer:
+        tf.logging.info("***** Eval results *****")
+        for key in sorted(result.keys()):
+          tf.logging.info("  %s = %s", key, str(result[key]))
+          writer.write("%s = %s\n" % (key, str(result[key])))
 
 
 if __name__ == "__main__":
