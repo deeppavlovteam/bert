@@ -544,7 +544,7 @@ def main(_):
         train_steps_per_epoch = FLAGS.num_train_steps % FLAGS.evaluate_every
 
     if FLAGS.do_train:
-      estimator.train(input_fn=train_input_fn, max_steps=train_steps_per_epoch)
+      estimator.train(input_fn=train_input_fn, steps=train_steps_per_epoch)
 
     if FLAGS.do_eval:
       result = estimator.evaluate(
