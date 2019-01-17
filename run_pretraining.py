@@ -469,7 +469,10 @@ def main(_):
     sess_config = tf.ConfigProto(allow_soft_placement=True)
     sess_config.gpu_options.allow_growth = True
 
-    distribution = tf.contrib.distribute.MirroredStrategy(num_gpus=FLAGS.num_gpus)
+    distribution = tf.contrib.distribute.MirroredStrategy(
+        num_gpus=FLAGS.num_gpus,
+        cross_tower_ops=tf.contrib.distribute.ReductionToOneDeviceCrossTowerOps(reduce_to_device='/cpu:0'),
+    )
     dist_config = tf.estimator.RunConfig(session_config=sess_config,
                                          train_distribute=distribution,
                                          eval_distribute=distribution,
