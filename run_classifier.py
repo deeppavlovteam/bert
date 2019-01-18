@@ -609,10 +609,10 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   # instead.
   # output_layer = model.get_pooled_output()
   output_layer = model.get_sequence_output()
-
+  pooled_layer = model.get_pooled_output()
+  pooled_layer = tf.expand_dims(pooled_layer, axis=-1)
   hs = output_layer.shape[-1].value
   output_layer = output_layer[:, 1:, :]
-  minimum = tf.reduce_min(output_layer)
   ones = tf.ones_like(output_layer, dtype='int32')
   zeros = tf.zeros_like(output_layer, dtype='int32')
   mask = segment_ids[:, 1:]
@@ -620,16 +620,20 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   mask = tf.tile(mask, [1, 1, hs])
   mask_a = tf.equal(mask, zeros)
   mask_a = tf.to_float(mask_a)
-  add_a = tf.scalar_mul(minimum, mask_a)
-  output_layer_a = tf.add(output_layer, add_a)
-  output_layer_a = tf.layers.max_pooling1d(output_layer_a, pool_size=(output_layer_a.shape[1],), strides=(1,))
-  output_layer_a = tf.squeeze(output_layer_a, axis=1)
+  output_layer_a = tf.multiply(output_layer, mask_a)
+  alpha = tf.matmul(output_layer_a, pooled_layer)
+  alpha = tf.nn.softmax(alpha, axis=1)
+  output_layer_a = tf.transpose(output_layer_a, perm=[0,2,1])
+  output_layer_a = tf.matmul(output_layer_a, alpha)
+  output_layer_a = tf.squeeze(output_layer_a)
   mask_b = tf.equal(mask, ones)
   mask_b = tf.to_float(mask_b)
-  add_b = tf.scalar_mul(minimum, mask_b)
-  output_layer_b = tf.add(output_layer, add_b)
-  output_layer_b = tf.layers.max_pooling1d(output_layer_b, pool_size=(output_layer_b.shape[1],), strides=(1,))
-  output_layer_b = tf.squeeze(output_layer_b, axis=1)
+  output_layer_b = tf.multiply(output_layer, mask_b)
+  beta = tf.matmul(output_layer_b, pooled_layer)
+  beta = tf.nn.softmax(beta, axis=1)
+  output_layer_b = tf.transpose(output_layer_b, perm=[0,2,1])
+  output_layer_b = tf.matmul(output_layer_b, beta)
+  output_layer_b = tf.squeeze(output_layer_b)
 
   #
   # output_weights = tf.get_variable(
