@@ -511,7 +511,7 @@ def main(_):
 
   if FLAGS.do_train:
     tf.logging.info("***** Running training *****")
-    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
+    if FLAGS.use_tpu:
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
     else:
         tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.train_batch_size, FLAGS.num_gpus)
@@ -524,7 +524,7 @@ def main(_):
   if FLAGS.do_eval:
     tf.logging.info("***** Running evaluation *****")
     FLAGS.eval_batch_size = FLAGS.train_batch_size
-    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
+    if FLAGS.use_tpu:
         tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
     else:
         # TODO: eval_batch_size is currently not used and is equal to train_batch_size
