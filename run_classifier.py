@@ -844,7 +844,7 @@ def main(_):
     tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
-  if FLAGS.use_tpu:
+  if FLAGS.use_tpu or FLAGS.num_gpus == 1:
     is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
     run_config = tf.contrib.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
@@ -893,7 +893,7 @@ def main(_):
       use_tpu=FLAGS.use_tpu,
       use_one_hot_embeddings=FLAGS.use_tpu)
 
-  if FLAGS.use_tpu:
+  if FLAGS.use_tpu or FLAGS.num_gpus == 1:
     # If TPU is not available, this will fall back to normal Estimator on CPU
     # or GPU.
     estimator = tf.contrib.tpu.TPUEstimator(
@@ -916,7 +916,7 @@ def main(_):
         train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num examples = %d", len(train_examples))
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
     else:
         tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.train_batch_size, FLAGS.num_gpus)
@@ -932,7 +932,7 @@ def main(_):
     eval_examples = processor.get_dev_examples(FLAGS.data_dir)
     num_actual_eval_examples = len(eval_examples)
     FLAGS.eval_batch_size = FLAGS.train_batch_size
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
       # TPU requires a fixed batch size for all batches, therefore the number
       # of examples must be a multiple of the batch size, or else examples
       # will get dropped. So we pad with fake examples which are ignored
@@ -949,7 +949,7 @@ def main(_):
     tf.logging.info("  Num examples = %d (%d actual, %d padding)",
                     len(eval_examples), num_actual_eval_examples,
                     len(eval_examples) - num_actual_eval_examples)
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
         tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
     else:
         # TODO: eval_batch_size is currently not used and is equal to train_batch_size
@@ -959,11 +959,11 @@ def main(_):
     eval_steps = None
     # However, if running eval on the TPU, you will need to specify the
     # number of steps.
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
       assert len(eval_examples) % FLAGS.eval_batch_size == 0
       eval_steps = int(len(eval_examples) // FLAGS.eval_batch_size)
 
-    eval_drop_remainder = True if FLAGS.use_tpu else False
+    eval_drop_remainder = True if FLAGS.use_tpu or FLAGS.num_gpus == 1 else False
     eval_input_fn = file_based_input_fn_builder(
         input_file=eval_file,
         seq_length=FLAGS.max_seq_length,
@@ -983,7 +983,7 @@ def main(_):
     predict_examples = processor.get_test_examples(FLAGS.data_dir)
     num_actual_predict_examples = len(predict_examples)
     FLAGS.predict_batch_size = FLAGS.train_batch_size
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
       # TPU requires a fixed batch size for all batches, therefore the number
       # of examples must be a multiple of the batch size, or else examples
       # will get dropped. So we pad with fake examples which are ignored
@@ -1000,12 +1000,12 @@ def main(_):
     tf.logging.info("  Num examples = %d (%d actual, %d padding)",
                     len(predict_examples), num_actual_predict_examples,
                     len(predict_examples) - num_actual_predict_examples)
-    if FLAGS.use_tpu:
+    if FLAGS.use_tpu or FLAGS.num_gpus == 1:
         tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
     else:
         tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.predict_batch_size, FLAGS.num_gpus)
 
-    predict_drop_remainder = True if FLAGS.use_tpu else False
+    predict_drop_remainder = True if FLAGS.use_tpu or FLAGS.num_gpus == 1 else False
     predict_input_fn = file_based_input_fn_builder(
         input_file=predict_file,
         seq_length=FLAGS.max_seq_length,
