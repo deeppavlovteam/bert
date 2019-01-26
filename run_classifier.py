@@ -667,8 +667,14 @@ def create_npair_model(bert_config, is_training,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  output_layer_a = model_a.get_pooled_output()
-  output_layer_b = model_b.get_pooled_output()
+  output_layer_a = model_a.get_all_encoder_layers()
+  output_layer_b = model_b.get_all_encoder_layers()
+  output_layer_a = tf.concat([el[:, 0:1, :] for el in output_layer_a], axis=1)
+  output_layer_b = tf.concat([el[:, 0:1, :] for el in output_layer_b], axis=1)
+  output_layer_a = tf.reduce_max(output_layer_a, axis=1)
+  output_layer_b = tf.reduce_max(output_layer_b, axis=1)
+  # output_layer_a = model_a.get_pooled_output()
+  # output_layer_b = model_b.get_pooled_output()
 
   # hidden_size = output_layer.shape[-1].value
   #
