@@ -677,9 +677,8 @@ def create_npair_model(bert_config, is_training,
   att_b = tf.nn.softmax(tf.matmul(output_layer_a, tf.expand_dims(pulled_b, axis=-1)))
   context_a = tf.matmul(tf.transpose(att_a, perm=[0, 2, 1]), output_layer_b)  # [bs, 1, hidden_size]
   context_b = tf.matmul(tf.transpose(att_b, perm=[0, 2, 1]), output_layer_a)
-
-  output_layer_a = tf.concat(pulled_a, tf.squeeze(context_a, axis=1), axis=-1)
-  output_layer_b = tf.concat(pulled_b, tf.squeeze(context_b, axis=1), axis=-1)
+  output_layer_a = tf.concat([pulled_a, tf.squeeze(context_a, 1)], 1)
+  output_layer_b = tf.concat([pulled_b, tf.squeeze(context_b, 1)], 1)
 
   # output_layer_a = tf.reduce_max(output_layer_a, axis=1)
   # output_layer_b = tf.reduce_max(output_layer_b, axis=1)
