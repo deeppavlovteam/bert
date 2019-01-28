@@ -677,9 +677,9 @@ def create_npair_model(bert_config, is_training,
   W_a = tf.get_variable("W_a", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
   W_b = tf.get_variable("W_b", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
 
-  att_a = tf.nn.softmax(tf.tensordot(tf.expand_dims(pulled_a, axis=1), W_a, [[2], [0]]))  # [bs, 1, hidden_size]
+  att_a = tf.tensordot(tf.expand_dims(pulled_a, axis=1), W_a, [[2], [0]])  # [bs, 1, hidden_size]
   att_a = tf.nn.softmax(tf.matmul(att_a, tf.transpose(output_layer_b, perm=[0, 2, 1])))  # [bs, 1, num_layers]
-  att_b = tf.nn.softmax(tf.tensordot(tf.expand_dims(pulled_b, axis=1), W_b, [[2], [0]]))  # [bs, 1, hidden_size]
+  att_b = tf.tensordot(tf.expand_dims(pulled_b, axis=1), W_b, [[2], [0]])  # [bs, 1, hidden_size]
   att_b = tf.nn.softmax(tf.matmul(att_b, tf.transpose(output_layer_a, perm=[0, 2, 1])))  # [bs, 1, num_layers]
   context_a = tf.matmul(att_a, output_layer_b)  # [bs, 1, hidden_size]
   context_b = tf.matmul(att_b, output_layer_a)
