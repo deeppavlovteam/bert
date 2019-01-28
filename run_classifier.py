@@ -673,13 +673,20 @@ def create_npair_model(bert_config, is_training,
   output_layer_b = model_b.get_all_encoder_layers()
   output_layer_a = tf.concat([el[:, 0:1, :] for el in output_layer_a], axis=1)  # [bs, num_layers, hidden_size]
   output_layer_b = tf.concat([el[:, 0:1, :] for el in output_layer_b], axis=1)
-  att_a = tf.nn.softmax(tf.matmul(output_layer_b, tf.expand_dims(pulled_a, axis=-1)))  # [bs, num_layers, 1]
-  att_b = tf.nn.softmax(tf.matmul(output_layer_a, tf.expand_dims(pulled_b, axis=-1)))
-  context_a = tf.matmul(tf.transpose(att_a, perm=[0, 2, 1]), output_layer_b)  # [bs, 1, hidden_size]
-  context_b = tf.matmul(tf.transpose(att_b, perm=[0, 2, 1]), output_layer_a)
+  hidden_size = pulled_a.shape[-1].value
+  W_a = tf.get_variable("W_a", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+  W_b = tf.get_variable("W_b", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
 
-  output_layer_a = tf.concat(pulled_a, tf.squeeze(context_a, axis=1), axis=-1)
-  output_layer_b = tf.concat(pulled_b, tf.squeeze(context_b, axis=1), axis=-1)
+  att_a = tf.nn.softmax(tf.tensordot(tf.expand_dims(pulled_a, axis=1), W_a, [[2], [0]]))  # [bs, 1, hidden_size]
+  att_a = tf.nn.softmax(tf.matmul(att_a, tf.transpose(output_layer_b, perm=[0, 2, 1])))  # [bs, 1, num_layers]
+  att_b = tf.nn.softmax(tf.tensordot(tf.expand_dims(pulled_b, axis=1), W_b, [[2], [0]]))  # [bs, 1, hidden_size]
+  att_b = tf.nn.softmax(tf.matmul(att_b, tf.transpose(output_layer_a, perm=[0, 2, 1])))  # [bs, 1, num_layers]
+  context_a = tf.matmul(att_a, output_layer_b)  # [bs, 1, hidden_size]
+  context_b = tf.matmul(att_b, output_layer_a)
+  context_a = tf.squeeze(context_a, axis=1)
+  context_b = tf.squeeze(context_b, axis=1)
+  output_layer_a = tf.concat(pulled_a, context_a, 1)
+  output_layer_b = tf.concat(pulled_b, context_b, 1)
 
   # output_layer_a = tf.reduce_max(output_layer_a, axis=1)
   # output_layer_b = tf.reduce_max(output_layer_b, axis=1)
