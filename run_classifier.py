@@ -673,18 +673,20 @@ def create_npair_model(bert_config, is_training,
   output_layer_b = model_b.get_all_encoder_layers()
   output_layer_a = tf.concat([el[:, 0:1, :] for el in output_layer_a], axis=1)  # [bs, num_layers, hidden_size]
   output_layer_b = tf.concat([el[:, 0:1, :] for el in output_layer_b], axis=1)
-  output_layer_a = tf.concat([output_layer_a, pulled_b], -1)  # [bs, num_layers, 2*hidden_size]
-  output_layer_b = tf.concat([output_layer_b, pulled_a], -1)
+  num_layers = output_layer_a.shape[1].value
+  concat_a = tf.concat([output_layer_a, tf.tile(pulled_b, [1, num_layers, 1])], -1)  # [bs, num_layers, 2*hidden_size]
+  concat_b = tf.concat([output_layer_b, tf.tile(pulled_a, [1, num_layers, 1])], -1)  # [bs, num_layers, 2*hidden_size]
 
   hidden_size = pulled_a.shape[-1].value
-  W_a = tf.get_variable("W_a", [2*hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+  W_a = tf.get_variable("W_a", [2*hidden_size, 1], initializer=tf.truncated_normal_initializer(stddev=0.02))
   W_b = tf.get_variable("W_b", [2*hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
 
 
-  att_a = tf.nn.softmax(tf.tensordot(tf.expand_dims(pulled_a, axis=1), W_a, [[2], [0]]))  # [bs, 1, hidden_size]
-  att_a = tf.nn.softmax(tf.matmul(att_a, tf.transpose(output_layer_b, perm=[0, 2, 1])))  # [bs, 1, num_layers]
-  att_b = tf.nn.softmax(tf.tensordot(tf.expand_dims(pulled_b, axis=1), W_b, [[2], [0]]))  # [bs, 1, hidden_size]
-  att_b = tf.nn.softmax(tf.matmul(att_b, tf.transpose(output_layer_a, perm=[0, 2, 1])))  # [bs, 1, num_layers]
+  att_a = tf.tensordot(concat_a, W_a, [[2], [0]])  # [bs, num_layers, 1]
+  att_a = tf.nn.softmax(tf.transpose(att_a, [0, 2, 1]))  # [bs, 1, num_layers]
+  att_b = tf.tensordot(concat_b, W_b, [[2], [0]])  # [bs, num_layers, 1]
+  att_b = tf.nn.softmax(tf.transpose(att_b, [0, 2, 1]))  # [bs, 1, num_layers]
+
   context_a = tf.matmul(att_a, output_layer_b)  # [bs, 1, hidden_size]
   context_b = tf.matmul(att_b, output_layer_a)
   output_layer_a = tf.concat([pulled_a, tf.squeeze(context_a, axis=1)], 1)
