@@ -667,20 +667,19 @@ def create_npair_model(bert_config, is_training,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  pulled_a = model_a.get_pooled_output()
+  pulled_a = model_a.get_pooled_output()  # [bs, hidden_size]
   pulled_b = model_b.get_pooled_output()
   output_layer_a = model_a.get_all_encoder_layers()
   output_layer_b = model_b.get_all_encoder_layers()
   output_layer_a = tf.concat([el[:, 0:1, :] for el in output_layer_a], axis=1)  # [bs, num_layers, hidden_size]
   output_layer_b = tf.concat([el[:, 0:1, :] for el in output_layer_b], axis=1)
   num_layers = output_layer_a.shape[1].value
-  concat_a = tf.concat([output_layer_a, tf.tile(pulled_b, [1, num_layers, 1])], -1)  # [bs, num_layers, 2*hidden_size]
-  concat_b = tf.concat([output_layer_b, tf.tile(pulled_a, [1, num_layers, 1])], -1)  # [bs, num_layers, 2*hidden_size]
+  concat_a = tf.concat([output_layer_a, tf.tile(tf.expand_dims(pulled_b, 1), [1, num_layers, 1])], -1)  # [bs, num_layers, 2*hidden_size]
+  concat_b = tf.concat([output_layer_b, tf.tile(tf.expand_dims(pulled_a, 1), [1, num_layers, 1])], -1)  # [bs, num_layers, 2*hidden_size]
 
   hidden_size = pulled_a.shape[-1].value
   W_a = tf.get_variable("W_a", [2*hidden_size, 1], initializer=tf.truncated_normal_initializer(stddev=0.02))
-  W_b = tf.get_variable("W_b", [2*hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
-
+  W_b = tf.get_variable("W_b", [2*hidden_size, 1], initializer=tf.truncated_normal_initializer(stddev=0.02))
 
   att_a = tf.tensordot(concat_a, W_a, [[2], [0]])  # [bs, num_layers, 1]
   att_a = tf.nn.softmax(tf.transpose(att_a, [0, 2, 1]))  # [bs, 1, num_layers]
