@@ -667,18 +667,19 @@ def create_npair_model(bert_config, is_training,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  pulled_a = model_a.get_pooled_output()
-  pulled_b = model_b.get_pooled_output()
-  output_layer_a = model_a.get_all_encoder_layers()
-  output_layer_b = model_b.get_all_encoder_layers()
-  output_layer_a = tf.concat([el[:, 0:1, :] for el in output_layer_a], axis=1)  # [bs, num_layers, hidden_size]
-  output_layer_b = tf.concat([el[:, 0:1, :] for el in output_layer_b], axis=1)
-  att_a = tf.nn.softmax(tf.matmul(output_layer_b, tf.expand_dims(pulled_a, axis=-1)))  # [bs, num_layers, 1]
-  att_b = tf.nn.softmax(tf.matmul(output_layer_a, tf.expand_dims(pulled_b, axis=-1)))
-  context_a = tf.matmul(tf.transpose(att_a, perm=[0, 2, 1]), output_layer_b)  # [bs, 1, hidden_size]
-  context_b = tf.matmul(tf.transpose(att_b, perm=[0, 2, 1]), output_layer_a)
-  output_layer_a = tf.concat([pulled_a, tf.squeeze(context_a, 1)], 1)
-  output_layer_b = tf.concat([pulled_b, tf.squeeze(context_b, 1)], 1)
+  output_layer_a = model_a.get_sequence_output() # [bs, seq_len, hidden_size]
+  output_layer_b = model_b.get_sequence_output()
+  att_a = tf.matmul(output_layer_b, tf.transpose(output_layer_a, perm=[0, 2, 1]))  # [bs, seq_len, seq_len]
+  att_b = tf.matmul(output_layer_a, tf.transpose(output_layer_b, perm=[0, 2, 1]))
+
+  output_layer_a = tf.matmul(att_a, output_layer_a)  # [bs, seq_len, hidden_size]
+  output_layer_b = tf.matmul(att_b, output_layer_b)
+
+  output_layer_a = tf.reduce_max(output_layer_a, axis=1)
+  output_layer_b = tf.reduce_max(output_layer_b, axis=1)
+
+  # output_layer_a = tf.concat([pulled_a, tf.squeeze(context_a, 1)], 1)
+  # output_layer_b = tf.concat([pulled_b, tf.squeeze(context_b, 1)], 1)
 
   # output_layer_a = tf.reduce_max(output_layer_a, axis=1)
   # output_layer_b = tf.reduce_max(output_layer_b, axis=1)
