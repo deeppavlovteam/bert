@@ -667,7 +667,7 @@ def create_npair_model(bert_config, is_training,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  output_layer_a = model_a.sequence_output()
+  output_layer_a = model_a.get_sequence_output()
   output_layer_b = model_b.get_sequence_output()
   output_layer_a = tf.reduce_max(output_layer_a, axis=1)
   output_layer_b = tf.reduce_max(output_layer_b, axis=1)
