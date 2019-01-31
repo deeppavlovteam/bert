@@ -667,24 +667,28 @@ def create_npair_model(bert_config, is_training,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  pulled_a = model_a.get_pooled_output()
-  pulled_b = model_b.get_pooled_output()
-  output_layer_a = model_a.get_all_encoder_layers()
-  output_layer_b = model_b.get_all_encoder_layers()
-  output_layer_a = tf.concat([el[:, 0:1, :] for el in output_layer_a], axis=1)  # [bs, num_layers, hidden_size]
-  output_layer_b = tf.concat([el[:, 0:1, :] for el in output_layer_b], axis=1)
-  hidden_size = pulled_a.shape[-1].value
-  W_a = tf.get_variable("W_a", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
-  W_b = tf.get_variable("W_b", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
 
-  att_a = tf.tensordot(tf.expand_dims(pulled_a, axis=1), W_a, [[2], [0]])  # [bs, 1, hidden_size]
-  att_a = tf.nn.softmax(tf.matmul(att_a, tf.transpose(output_layer_b, perm=[0, 2, 1])))  # [bs, 1, num_layers]
-  att_b = tf.tensordot(tf.expand_dims(pulled_b, axis=1), W_b, [[2], [0]])  # [bs, 1, hidden_size]
-  att_b = tf.nn.softmax(tf.matmul(att_b, tf.transpose(output_layer_a, perm=[0, 2, 1])))  # [bs, 1, num_layers]
-  context_a = tf.matmul(att_a, output_layer_b)  # [bs, 1, hidden_size]
-  context_b = tf.matmul(att_b, output_layer_a)
-  output_layer_a = tf.concat([pulled_a, tf.squeeze(context_a, axis=1)], 1)
-  output_layer_b = tf.concat([pulled_b, tf.squeeze(context_b, axis=1)], 1)
+  output_layer_a = model_a.get_sequence_output() # [bs, seq_len, hidden_size]
+  output_layer_b = model_b.get_sequence_output()
+
+  hidden_size = output_layer_a.shape[-1].value
+  Q_a = tf.get_variable("Q_a", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+  Q_b = tf.get_variable("Q_b", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+  K_a = tf.get_variable("K_a", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+  K_b = tf.get_variable("K_b", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+  V_a = tf.get_variable("V_a", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+  V_b = tf.get_variable("V_b", [hidden_size, hidden_size], initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+  att_a = tf.matmul(tf.tensordot(output_layer_b, Q_b, [[2], [0]]) ,
+                    tf.transpose(tf.tensordot(output_layer_a, K_a, [[2], [0]]), perm=[0, 2, 1]))  # [bs, seq_len, seq_len]
+  att_b = tf.matmul(tf.tensordot(output_layer_a, Q_a, [[2], [0]]) ,
+                    tf.transpose(tf.tensordot(output_layer_b, K_b, [[2], [0]]), perm=[0, 2, 1]))  # [bs, seq_len, seq_len]
+
+  output_layer_a = tf.matmul(att_a, tf.tensordot(output_layer_a, V_a, [[2], [0]]))  # [bs, seq_len, hidden_size]
+  output_layer_b = tf.matmul(att_b, tf.tensordot(output_layer_b, V_b, [[2], [0]]))
+
+  output_layer_a = tf.reduce_max(output_layer_a, axis=1)
+  output_layer_b = tf.reduce_max(output_layer_b, axis=1)
 
   # output_layer_a = tf.reduce_max(output_layer_a, axis=1)
   # output_layer_b = tf.reduce_max(output_layer_b, axis=1)
