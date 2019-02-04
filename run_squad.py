@@ -272,8 +272,11 @@ def read_squad_examples(input_file, is_training):
             answer_offset = answer["answer_start"]
             answer_length = len(orig_answer_text)
             start_position = char_to_word_offset[answer_offset]
-            end_position = char_to_word_offset[answer_offset + answer_length -
-                                               1]
+            try:
+                end_position = char_to_word_offset[answer_offset + answer_length - 1]
+            except IndexError:
+                tf.logging.warning("Can't restore answer position. Skipping...")
+                continue
             # Only add answers where the text can be exactly recovered from the
             # document. If this CAN'T happen it's likely due to weird Unicode
             # stuff so we will just skip the example.
@@ -721,7 +724,7 @@ def input_fn_builder(input_file, seq_length, is_training, drop_remainder):
     d = tf.data.TFRecordDataset(input_file)
     if is_training:
       d = d.repeat()
-      d = d.shuffle(buffer_size=100)
+      d = d.shuffle(buffer_size=1000)
 
     d = d.apply(
         tf.contrib.data.map_and_batch(
@@ -1140,16 +1143,30 @@ def main(_):
     tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
-  is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
-  run_config = tf.contrib.tpu.RunConfig(
-      cluster=tpu_cluster_resolver,
-      master=FLAGS.master,
-      model_dir=FLAGS.output_dir,
-      save_checkpoints_steps=FLAGS.save_checkpoints_steps,
-      tpu_config=tf.contrib.tpu.TPUConfig(
-          iterations_per_loop=FLAGS.iterations_per_loop,
-          num_shards=FLAGS.num_tpu_cores,
-          per_host_input_for_training=is_per_host))
+  if FLAGS.use_tpu or FLAGS.num_gpus == 1:
+      is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+      run_config = tf.contrib.tpu.RunConfig(
+          cluster=tpu_cluster_resolver,
+          master=FLAGS.master,
+          model_dir=FLAGS.output_dir,
+          save_checkpoints_steps=FLAGS.save_checkpoints_steps,
+          tpu_config=tf.contrib.tpu.TPUConfig(
+              iterations_per_loop=FLAGS.iterations_per_loop,
+              num_shards=FLAGS.num_tpu_cores,
+              per_host_input_for_training=is_per_host))
+  else:
+    sess_config = tf.ConfigProto(allow_soft_placement=True)
+    sess_config.gpu_options.allow_growth = True
+
+    distribution = tf.contrib.distribute.MirroredStrategy(
+        num_gpus=FLAGS.num_gpus,
+        cross_tower_ops=tf.contrib.distribute.ReductionToOneDeviceCrossTowerOps(reduce_to_device='/cpu:0'),
+    )
+    dist_config = tf.estimator.RunConfig(session_config=sess_config,
+                                         train_distribute=distribution,
+                                         eval_distribute=distribution,
+                                         model_dir=FLAGS.output_dir,
+                                         save_checkpoints_steps=FLAGS.save_checkpoints_steps)
 
   train_examples = None
   num_train_steps = None
@@ -1159,6 +1176,10 @@ def main(_):
         input_file=FLAGS.train_file, is_training=True)
     num_train_steps = int(
         len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
+
+    if not FLAGS.use_tpu:
+        num_train_steps = int(num_train_steps / FLAGS.num_gpus)
+
     num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
 
     # Pre-shuffle the input to avoid having to make a very large shuffle
@@ -1175,14 +1196,21 @@ def main(_):
       use_tpu=FLAGS.use_tpu,
       use_one_hot_embeddings=FLAGS.use_tpu)
 
-  # If TPU is not available, this will fall back to normal Estimator on CPU
-  # or GPU.
-  estimator = tf.contrib.tpu.TPUEstimator(
-      use_tpu=FLAGS.use_tpu,
-      model_fn=model_fn,
-      config=run_config,
-      train_batch_size=FLAGS.train_batch_size,
-      predict_batch_size=FLAGS.predict_batch_size)
+  if FLAGS.use_tpu or FLAGS.num_gpus == 1:
+    # If TPU is not available, this will fall back to normal Estimator on CPU
+    # or GPU.
+    estimator = tf.contrib.tpu.TPUEstimator(
+        use_tpu=FLAGS.use_tpu,
+        model_fn=model_fn,
+        config=run_config,
+        train_batch_size=FLAGS.train_batch_size,
+        predict_batch_size=FLAGS.predict_batch_size)
+  else:
+    estimator = tf.estimator.Estimator(
+        model_fn=model_fn,
+        config=dist_config,
+        # TODO: check if we need these params
+        params={'batch_size': FLAGS.train_batch_size})
 
   if FLAGS.do_train:
     # We write to a temporary file to avoid storing very large constant tensors
@@ -1203,7 +1231,10 @@ def main(_):
     tf.logging.info("***** Running training *****")
     tf.logging.info("  Num orig examples = %d", len(train_examples))
     tf.logging.info("  Num split examples = %d", train_writer.num_features)
-    tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    if FLAGS.use_tpu:
+        tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+    else:
+        tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.train_batch_size, FLAGS.num_gpus)
     tf.logging.info("  Num steps = %d", num_train_steps)
     del train_examples
 
@@ -1215,6 +1246,7 @@ def main(_):
     estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
   if FLAGS.do_predict:
+    FLAGS.predict_batch_size = FLAGS.train_batch_size
     eval_examples = read_squad_examples(
         input_file=FLAGS.predict_file, is_training=False)
 
@@ -1240,7 +1272,10 @@ def main(_):
     tf.logging.info("***** Running predictions *****")
     tf.logging.info("  Num orig examples = %d", len(eval_examples))
     tf.logging.info("  Num split examples = %d", len(eval_features))
-    tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+    if FLAGS.use_tpu:
+        tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+    else:
+        tf.logging.info("  per gpu batch size = %d, num_gpus = %d", FLAGS.predict_batch_size, FLAGS.num_gpus)
 
     all_results = []
 
