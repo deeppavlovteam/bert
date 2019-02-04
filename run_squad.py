@@ -153,6 +153,10 @@ flags.DEFINE_float(
     "null_score_diff_threshold", 0.0,
     "If null_score - best_non_null is greater than the threshold predict null.")
 
+flags.DEFINE_integer(
+    "num_gpus", 1,
+    "Only used if `use_tpu` is False. Total number of GPUs to use.")
+
 
 class SquadExample(object):
   """A single training/test example for simple sequence classification.
