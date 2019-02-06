@@ -29,7 +29,6 @@ from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import resource_variable_ops
 
 
-
 def create_optimizer(loss, init_lr, num_train_steps, num_warmup_steps, use_tpu, variables_to_train=None):
   """Creates an optimizer training op."""
   global_step = tf.train.get_or_create_global_step()

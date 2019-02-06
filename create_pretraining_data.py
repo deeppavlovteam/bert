@@ -21,7 +21,7 @@ from __future__ import print_function
 import collections
 import random
 import tensorflow as tf
-import tokenization
+from bert_dp import tokenization
 
 flags = tf.flags
 
