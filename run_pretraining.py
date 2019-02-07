@@ -108,12 +108,15 @@ flags.DEFINE_integer(
     "num_gpus", 1,
     "Only used if `use_tpu` is False. Total number of GPUs to use.")
 
-flags.DEFINE_bool("train_only_embeddings", False, "Whether to train only embeddings variable.")
+flags.DEFINE_bool("train_token_embeddings", False, "Whether to train token embeddings variable.")
+
+flags.DEFINE_bool("train_positional_embeddings", False, "Whether to train positional embeddings variable.")
 
 
 def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings, train_only_embeddings):
+                     use_one_hot_embeddings, train_token_embeddings,
+                     train_positional_embeddings):
   """Returns `model_fn` closure for TPUEstimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -179,10 +182,21 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
-      with tf.variable_scope("cls/predictions", reuse=tf.AUTO_REUSE):
-        if train_only_embeddings:
+
+      vars_to_train = []
+      if train_token_embeddings:
+        with tf.variable_scope("cls/predictions", reuse=tf.AUTO_REUSE):
           output_bias = tf.get_variable("output_bias", shape=[bert_config.vocab_size])
-      vars_to_train = [model.embedding_table, output_bias] if train_only_embeddings else None
+        vars_to_train.extend([model.embedding_table, output_bias])
+
+      if train_positional_embeddings:
+          with tf.variable_scope('bert/embeddings', reuse=tf.AUTO_REUSE):
+              pos_emb_shape = [bert_config.max_position_embeddings, bert_config.hidden_size]
+              vars_to_train.append(tf.get_variable("position_embeddings", shape=pos_emb_shape))
+
+      if not (train_token_embeddings or train_positional_embeddings):
+          vars_to_train = tf.trainable_variables()
+
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu,
           vars_to_train)
@@ -488,7 +502,8 @@ def main(_):
       num_warmup_steps=FLAGS.num_warmup_steps,
       use_tpu=FLAGS.use_tpu,
       use_one_hot_embeddings=FLAGS.use_tpu,
-      train_only_embeddings=FLAGS.train_only_embeddings)
+      train_token_embeddings=FLAGS.train_token_embeddings,
+      train_positional_embeddings=FLAGS.train_positional_embeddings)
 
   if FLAGS.use_tpu or FLAGS.num_gpus == 1:
     # If TPU is not available, this will fall back to normal Estimator on CPU
@@ -505,7 +520,6 @@ def main(_):
         config=dist_config,
         # TODO: check if we need these params
         params={'batch_size': FLAGS.train_batch_size})
-
   if FLAGS.do_train:
     tf.logging.info("***** Running training *****")
     if FLAGS.use_tpu:
