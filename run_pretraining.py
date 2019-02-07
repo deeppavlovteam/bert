@@ -520,7 +520,6 @@ def main(_):
         config=dist_config,
         # TODO: check if we need these params
         params={'batch_size': FLAGS.train_batch_size})
-fgff
   if FLAGS.do_train:
     tf.logging.info("***** Running training *****")
     if FLAGS.use_tpu:
