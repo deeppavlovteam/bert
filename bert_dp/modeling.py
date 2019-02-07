@@ -155,9 +155,15 @@ class BertModel(object):
         is invalid.
     """
     config = copy.deepcopy(config)
-    if not is_training:
-      config.hidden_dropout_prob = 0.0
-      config.attention_probs_dropout_prob = 0.0
+    if isinstance(is_training, bool):
+      hidden_dropout_prob = config.hidden_dropout_prob
+      attention_probs_dropout_prob = config.attention_probs_dropout_prob
+      if not is_training:
+        hidden_dropout_prob = 0.0
+        attention_probs_dropout_prob = 0.0
+    else:
+      hidden_dropout_prob = tf.cond(is_training, lambda: config.hidden_dropout_prob, lambda: 0.0)
+      attention_probs_dropout_prob = tf.cond(is_training, lambda: config.attention_probs_dropout_prob, lambda: 0.0)
 
     input_shape = get_shape_list(input_ids, expected_rank=2)
     batch_size = input_shape[0]
@@ -192,7 +198,7 @@ class BertModel(object):
             position_embedding_name="position_embeddings",
             initializer_range=config.initializer_range,
             max_position_embeddings=config.max_position_embeddings,
-            dropout_prob=config.hidden_dropout_prob)
+            dropout_prob=hidden_dropout_prob)
 
       with tf.variable_scope("encoder"):
         # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
@@ -211,8 +217,8 @@ class BertModel(object):
             num_attention_heads=config.num_attention_heads,
             intermediate_size=config.intermediate_size,
             intermediate_act_fn=get_activation(config.hidden_act),
-            hidden_dropout_prob=config.hidden_dropout_prob,
-            attention_probs_dropout_prob=config.attention_probs_dropout_prob,
+            hidden_dropout_prob=hidden_dropout_prob,
+            attention_probs_dropout_prob=attention_probs_dropout_prob,
             initializer_range=config.initializer_range,
             do_return_all_layers=True)
 
@@ -353,8 +359,9 @@ def dropout(input_tensor, dropout_prob):
   Returns:
     A version of `input_tensor` with dropout applied.
   """
-  if dropout_prob is None or dropout_prob == 0.0:
-    return input_tensor
+  if dropout_prob is None or isinstance(dropout_prob, float):
+    if dropout_prob == 0.0:
+      return input_tensor
 
   output = tf.nn.dropout(input_tensor, 1.0 - dropout_prob)
   return output
