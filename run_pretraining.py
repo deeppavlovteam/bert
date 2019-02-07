@@ -502,7 +502,8 @@ def main(_):
       num_warmup_steps=FLAGS.num_warmup_steps,
       use_tpu=FLAGS.use_tpu,
       use_one_hot_embeddings=FLAGS.use_tpu,
-      train_token_embeddings=FLAGS.train_only_embeddings)
+      train_token_embeddings=FLAGS.train_token_embeddings,
+      train_positional_embeddings=FLAGS.train_positional_embeddings)
 
   if FLAGS.use_tpu or FLAGS.num_gpus == 1:
     # If TPU is not available, this will fall back to normal Estimator on CPU
