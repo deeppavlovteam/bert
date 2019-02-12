@@ -105,7 +105,8 @@ class AdamWeightDecayOptimizer(optimizer.Optimizer):
                  beta_2=0.999,
                  epsilon=1e-6,
                  exclude_from_weight_decay=None,
-                 name="AdamWeightDecayOptimizer"):
+                 name="AdamWeightDecayOptimizer",
+                 **kwargs):
         """Constructs a AdamWeightDecayOptimizer."""
         super(AdamWeightDecayOptimizer, self).__init__(False, name)
 
