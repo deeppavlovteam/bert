@@ -47,7 +47,7 @@ flags.DEFINE_integer("max_seq_length", 128, "Maximum sequence length.")
 flags.DEFINE_integer("max_predictions_per_seq", 20,
                      "Maximum number of masked LM predictions per sequence.")
 
-flags.DEFINE_integer("random_seed", 12345, "Random seed for data generation.")
+flags.DEFINE_integer("random_seed", None, "Random seed for data generation.")
 
 flags.DEFINE_integer(
     "dupe_factor", 10,

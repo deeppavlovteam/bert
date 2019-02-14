@@ -492,7 +492,9 @@ def main(_):
                                          train_distribute=distribution,
                                          eval_distribute=distribution,
                                          model_dir=FLAGS.output_dir,
-                                         save_checkpoints_steps=FLAGS.save_checkpoints_steps)
+                                         save_checkpoints_steps=FLAGS.save_checkpoints_steps,
+                                         keep_checkpoint_max=None,
+                                         )
 
   model_fn = model_fn_builder(
       bert_config=bert_config,
