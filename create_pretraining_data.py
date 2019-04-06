@@ -20,8 +20,15 @@ from __future__ import print_function
 
 import collections
 import random
+from itertools import chain
+
+from nltk.tokenize import sent_tokenize
 import tensorflow as tf
+from tqdm import tqdm
+
 from bert_dp import tokenization
+from qa_utils import YahooL6QBERTDataset
+
 
 flags = tf.flags
 
@@ -331,12 +338,82 @@ def create_instances_from_document(
   return instances
 
 
+def create_training_instances_qa(input_files, tokenizer, max_seq_length,
+                                 dupe_factor, short_seq_prob, masked_lm_prob,
+                                 max_predictions_per_seq, rng):
+  assert len(input_files) == 1
+  input_file = input_files[0]
+  qa_dataset = YahooL6QBERTDataset(input_file, tokenizer)
+  qa_dataset.fit_tfidf()
+  vocab_words = list(tokenizer.vocab.keys())
+  instances = []
+
+  # Account for [CLS], [SEP], [SEP]
+  max_num_tokens = max_seq_length - 3
+  for _ in range(dupe_factor):
+    for q, a, label in tqdm(qa_dataset.sample_qa_pairs(false_answer_rate=0.5,
+                                                       not_best_answer_rate=0.3,
+                                                       tfidf_top_k=1000,
+                                                       shuffle=True,
+                                                       question_extension_rate=0.0)):
+      tokens_a = tokenizer.tokenize(q)
+
+      # Skip to long questions
+      if len(tokens_a) > max_num_tokens // 2:
+        continue
+      n_tokens = len(tokens_a)
+      a_paragraphs = [s for s in a.split('\n') if s]
+      a_sents = list(chain(*[sent_tokenize(p) for p in a_paragraphs]))
+      a_sents_tokens = [tokenizer.tokenize(s) for s in a_sents]
+      tokens_b = []
+
+      for n, sent in enumerate(a_sents_tokens):
+        if len(sent) + n_tokens > max_num_tokens:
+          break
+        tokens_b.extend(sent)
+        n_tokens += len(sent)
+      if len(tokens_b) == 0:
+        tokens_b.extend(sent[:n_tokens - max_num_tokens])
+
+      tokens = []
+      segment_ids = []
+      tokens.append("[CLS]")
+      segment_ids.append(0)
+      for token in tokens_a:
+        tokens.append(token)
+        segment_ids.append(0)
+
+      tokens.append("[SEP]")
+      segment_ids.append(0)
+
+      for token in tokens_b:
+        tokens.append(token)
+        segment_ids.append(1)
+      tokens.append("[SEP]")
+      segment_ids.append(1)
+
+      (tokens, masked_lm_positions,
+       masked_lm_labels) = create_masked_lm_predictions(
+        tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
+      instance = TrainingInstance(
+        tokens=tokens,
+        segment_ids=segment_ids,
+        is_random_next=label,
+        masked_lm_positions=masked_lm_positions,
+        masked_lm_labels=masked_lm_labels)
+      instances.append(instance)
+
+  rng.shuffle(instances)
+  return instances
+
+
 MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
                                           ["index", "label"])
 
 
 def create_masked_lm_predictions(tokens, masked_lm_prob,
-                                 max_predictions_per_seq, vocab_words, rng):
+                                 max_predictions_per_seq,
+                                 vocab_words, rng):
   """Creates the predictions for the masked LM objective."""
 
   cand_indexes = []
@@ -421,7 +498,7 @@ def main(_):
     tf.logging.info("  %s", input_file)
 
   rng = random.Random(FLAGS.random_seed)
-  instances = create_training_instances(
+  instances = create_training_instances_qa(
       input_files, tokenizer, FLAGS.max_seq_length, FLAGS.dupe_factor,
       FLAGS.short_seq_prob, FLAGS.masked_lm_prob, FLAGS.max_predictions_per_seq,
       rng)
