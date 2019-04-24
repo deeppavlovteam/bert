@@ -341,7 +341,7 @@ class UbuntuV2Processor(DataProcessor):
 
   def get_train_labels(self):
     """See base class."""
-    return self.train_labels
+    return [0, 1]
 
   def get_eval_labels(self):
     return list(range(10))
@@ -525,6 +525,7 @@ def file_based_convert_examples_to_features(
 
     tf_example = tf.train.Example(features=tf.train.Features(feature=features))
     writer.write(tf_example.SerializeToString())
+  writer.close()
 
 
 def file_based_input_fn_builder(input_file, seq_length, is_training,
@@ -592,7 +593,7 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
-                 labels, use_one_hot_embeddings):
+                 labels, num_labels, use_one_hot_embeddings):
   """Creates a classification model."""
   model = modeling.BertModel(
       config=bert_config,
@@ -607,69 +608,38 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
   #
   # If you want to use the token-level output, use model.get_sequence_output()
   # instead.
-  # output_layer = model.get_pooled_output()
-  output_layer = model.get_sequence_output()
-  pooled_layer = model.get_pooled_output()
-  pooled_layer = tf.expand_dims(pooled_layer, axis=-1)
-  hs = output_layer.shape[-1].value
-  output_layer = output_layer[:, 1:, :]
-  ones = tf.ones_like(output_layer, dtype='int32')
-  zeros = tf.zeros_like(output_layer, dtype='int32')
-  mask = segment_ids[:, 1:]
-  mask = tf.expand_dims(mask, -1)
-  mask = tf.tile(mask, [1, 1, hs])
-  mask_a = tf.equal(mask, zeros)
-  mask_a = tf.to_float(mask_a)
-  output_layer_a = tf.multiply(output_layer, mask_a)
-  alpha = tf.matmul(output_layer_a, pooled_layer)
-  alpha = tf.nn.softmax(alpha, axis=1)
-  output_layer_a = tf.transpose(output_layer_a, perm=[0,2,1])
-  output_layer_a = tf.matmul(output_layer_a, alpha)
-  output_layer_a = tf.squeeze(output_layer_a)
-  mask_b = tf.equal(mask, ones)
-  mask_b = tf.to_float(mask_b)
-  output_layer_b = tf.multiply(output_layer, mask_b)
-  beta = tf.matmul(output_layer_b, pooled_layer)
-  beta = tf.nn.softmax(beta, axis=1)
-  output_layer_b = tf.transpose(output_layer_b, perm=[0,2,1])
-  output_layer_b = tf.matmul(output_layer_b, beta)
-  output_layer_b = tf.squeeze(output_layer_b)
+  output_layer = model.get_pooled_output()
 
-  #
-  # output_weights = tf.get_variable(
-  #     "output_weights", [num_labels, hidden_size],
-  #     initializer=tf.truncated_normal_initializer(stddev=0.02))
-  #
-  # output_bias = tf.get_variable(
-  #     "output_bias", [num_labels], initializer=tf.zeros_initializer())
+  hidden_size = output_layer.shape[-1].value
+
+  output_weights = tf.get_variable(
+      "output_weights", [num_labels, hidden_size],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+
+  output_bias = tf.get_variable(
+      "output_bias", [num_labels], initializer=tf.zeros_initializer())
 
   with tf.variable_scope("loss"):
     if is_training:
       # I.e., 0.1 dropout
-      output_layer_a = tf.nn.dropout(output_layer_a, keep_prob=0.9)
-      output_layer_b = tf.nn.dropout(output_layer_b, keep_prob=0.9)
+      output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
 
-    # logits = tf.matmul(output_layer, output_weights, transpose_b=True)
-    # logits = tf.nn.bias_add(logits, output_bias)
-    # probabilities = tf.nn.softmax(logits, axis=-1)
-    # log_probs = tf.nn.log_softmax(logits, axis=-1)
-    #
-    # one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
-    #
-    # per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
-    # loss = tf.reduce_mean(per_example_loss)
+    logits = tf.matmul(output_layer, output_weights, transpose_b=True)
+    logits = tf.nn.bias_add(logits, output_bias)
+    probabilities = tf.nn.softmax(logits, axis=-1)
+    # probabilities = tf.split(probabilities, 2, axis=-1)[1]
+    probabilities = probabilities[:, 1]
+    log_probs = tf.nn.log_softmax(logits, axis=-1)
 
-    loss = tf.contrib.losses.metric_learning.npairs_loss(labels, output_layer_a, output_layer_b)
-    # output_layer_a = tf.math.l2_normalize(output_layer_a, axis=1)
-    # output_layer_b = tf.math.l2_normalize(output_layer_b, axis=1)
-    logits = tf.multiply(output_layer_a, output_layer_b)
-    logits = tf.reduce_sum(logits, 1)
+    one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
 
-    # return (loss, per_example_loss, logits, probabilities)
-    return loss, logits
+    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
+    loss = tf.reduce_mean(per_example_loss)
+
+    return (loss, per_example_loss, logits, probabilities)
 
 
-def model_fn_builder(bert_config, init_checkpoint, learning_rate,
+def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
   """Returns `model_fn` closure for TPUEstimator."""
@@ -688,15 +658,9 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-    # (total_loss, per_example_loss, logits, probabilities) = create_npair_model(
-    #     bert_config, is_training,
-    #     input_ids_a, input_mask_a, segment_ids_a, label_ids_a,
-    #     input_ids_b, input_mask_b, segment_ids_b, label_ids_b,
-    #     num_labels, use_one_hot_embeddings)
-    total_loss, logits = create_model(
-        bert_config, is_training,
-        input_ids, input_mask, segment_ids, label_ids,
-        use_one_hot_embeddings)
+    (total_loss, per_example_loss, logits, probabilities) = create_model(
+        bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
+        num_labels, use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
     initialized_variable_names = {}
@@ -724,6 +688,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
+
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
@@ -734,8 +699,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
           scaffold_fn=scaffold_fn)
     # elif mode == tf.estimator.ModeKeys.EVAL:
     else:
-      def metric_fn(loss, label_ids, logits):
-        predictions = tf.reshape(logits, [-1, 10])
+      def metric_fn(loss, label_ids, probabilities):
+        predictions = tf.reshape(probabilities, [-1, 10])
         labels = tf.to_int64(tf.reshape(label_ids, [-1, 10]))
         r_at_1 = tf.metrics.recall_at_k(labels, predictions, 1, class_id=0)
         r_at_2 = tf.metrics.recall_at_k(labels, predictions, 2, class_id=0)
@@ -747,7 +712,7 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
             # "eval_loss": loss,
         }
 
-      eval_metrics = (metric_fn, [total_loss, label_ids, logits])
+      eval_metrics = (metric_fn, [total_loss, label_ids, probabilities])
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
@@ -869,6 +834,8 @@ def main(_):
 
   processor = processors[task_name]()
 
+  label_list = processor.get_train_labels()
+
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
@@ -900,6 +867,7 @@ def main(_):
 
   model_fn = model_fn_builder(
       bert_config=bert_config,
+      num_labels=len(label_list),
       init_checkpoint=FLAGS.init_checkpoint,
       learning_rate=FLAGS.learning_rate,
       num_train_steps=num_train_steps,
