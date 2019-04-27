@@ -19,6 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
+import re
 import csv
 import os
 import modeling
@@ -406,6 +407,20 @@ class ColaProcessor(DataProcessor):
           InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
     return examples
 
+def return_eou_eot(text):
+    sp_text = []
+    turns = text.split('__eot__')
+    turns = turns[:-1]
+    assert (len(turns) == len(re.findall('__eot__', text)))
+    for t in turns:
+        utts = t.split('__eou__')
+        utts = utts[:-1]
+        assert (len(utts) == len(re.findall('__eou__', t)))
+        for u in utts:
+            sp_text.append(u)
+            sp_text.append('__eou__')
+        sp_text.append('__eot__')
+    return sp_text
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
                            tokenizer):
@@ -414,10 +429,27 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
   # for (i, label) in enumerate(label_list):
   #   label_map[label] = i
 
-  tokens_a = tokenizer.tokenize(example.text_a)
+  # tokens_a = tokenizer.tokenize(example.text_a)
+  # tokens_b = None
+  # if example.text_b:
+  #   tokens_b = tokenizer.tokenize(example.text_b)
+
+  tokens_a = []
+  sp_text_a = return_eou_eot(example.text_a)
+  for el in sp_text_a:
+    if el != '__eot__' and el != '__eou__':
+      tokens_a += tokenizer.tokenize(el)
+    else:
+      tokens_a.append(el)
   tokens_b = None
   if example.text_b:
-    tokens_b = tokenizer.tokenize(example.text_b)
+    tokens_b = []
+    sp_text_b = return_eou_eot(example.text_b)
+    for el in sp_text_b:
+        if el != '__eot__' and el != '__eou__':
+          tokens_b += tokenizer.tokenize(el)
+        else:
+          tokens_b.append(el)
 
   if tokens_b:
     # Modifies `tokens_a` and `tokens_b` in place so that the total
