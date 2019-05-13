@@ -1,3 +1,5 @@
+from typing import Mapping, Optional
+
 import tensorflow as tf
 import numpy as np
 
@@ -16,11 +18,11 @@ def _get_pos_encoding_matrix(max_len: int, d_emb: int) -> np.array:
     return pos_enc
 
 
-class BERTInputEmbedding(tf.keras.layers.Layer):
+class BERTCombinedEmbedding(tf.keras.layers.Layer):
     def __init__(self,
                  output_dim: int = 768,
                  use_one_hot_embedding: bool = False,  # currently is not used
-                 dropout: float = 0.1,
+                 dropout_rate: float = 0.1,
                  vocab_size: int = 119547,
                  max_len: int = 512,
                  initializer_range: float = 0.02,
@@ -30,10 +32,11 @@ class BERTInputEmbedding(tf.keras.layers.Layer):
                  # is tf.keras version identical to the original layer_norm, which is copied above?
                  **kwargs) -> None:
         super().__init__(**kwargs)
+
         self.max_len = max_len
         # self.use_one_hot_embedding = use_one_hot_embedding
         self.output_dim = output_dim
-        self.dropout = dropout
+        self.dropout = dropout_rate
         self.vocab_size = vocab_size
         self.trainable_pos_embedding = trainable_pos_embedding
 
@@ -60,19 +63,22 @@ class BERTInputEmbedding(tf.keras.layers.Layer):
                                                        stddev=initializer_range),
                                                    input_length=max_len,
                                                    name='word_embeddings')
-        self.embedding_dropout = tf.keras.layers.Dropout(rate=dropout)
+        self.embedding_dropout = tf.keras.layers.Dropout(rate=dropout_rate)
         self.embedding_layer_norm = tf.keras.layers.LayerNormalization(epsilon=layer_norm_epsilon, name='LayerNorm')
 
     def compute_output_shape(self, input_shape):
         return input_shape[0][0], input_shape[0][1], self.output_dim
 
-    def call(self, inputs, training=None, mask=None, **kwargs):
-        token_ids, segment_ids, pos_ids = inputs
-        segment_embeddings = self.segment_emb(segment_ids)
-        pos_embeddings = self.pos_emb(pos_ids)
-        token_embeddings = self.token_emb(token_ids)
-        emb_sum = segment_embeddings + pos_embeddings + token_embeddings
-        emb_sum_norm = self.embedding_layer_norm(emb_sum)
+    def call(self,
+             inputs: Mapping[str, tf.Tensor],
+             training: Optional[bool] = None,
+             mask: Optional[tf.Tensor] = None,
+             **kwargs) -> tf.Tensor:
+
+        segment_embeddings = self.segment_emb(inputs['segment_ids'])
+        pos_embeddings = self.pos_emb(inputs['pos_ids'])
+        token_embeddings = self.token_emb(inputs['token_ids'])
+        emb_sum_norm = self.embedding_layer_norm(segment_embeddings + pos_embeddings + token_embeddings)
         return self.embedding_dropout(emb_sum_norm)
 
     # def get_config(self):
