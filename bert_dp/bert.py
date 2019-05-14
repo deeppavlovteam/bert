@@ -1,12 +1,20 @@
 from typing import Mapping, Optional, Union
 
 import tensorflow as tf
+
 from .embeddings import BERTCombinedEmbedding
 from .encoder import TransformerEncoder
 from .activations import gelu
+from .normalization import LayerNormalization
 
 
-class BERT(tf.keras.layers.Layer):
+# def layer_norm(input_tensor, name=None):
+#   """Run layer normalization on the last dimension of the tensor."""
+#   return tf.contrib.layers.layer_norm(
+#       inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
+
+
+class BERT(tf.keras.Model):
     """BERT body"""
     def __init__(self,
                  use_one_hot_embedding: bool = False,
@@ -16,6 +24,8 @@ class BERT(tf.keras.layers.Layer):
                  initializer_range: float = 0.02,
                  trainable_pos_embedding: bool = True,  # always True in the original implementation
                  layer_norm_epsilon: float = 1e-12,
+                 # https://github.com/tensorflow/tensorflow/blob/r1.13/tensorflow/contrib/layers/python/layers/layers.py#L2315
+                 # is tf.keras version identical to the original layer_norm, which is copied above?
                  hidden_size: int = 768,
                  intermediate_size: int = 3072,
                  num_hidden_layers: int = 12,
@@ -24,17 +34,17 @@ class BERT(tf.keras.layers.Layer):
                  intermediate_act_fn: Union[str, callable] = gelu,
                  pooler_fc_size: int = 768,
                  **kwargs) -> None:
-        # hardcoded name!
-        super().__init__(name='bert', **kwargs)
+        super().__init__(**kwargs)
         self.emb = BERTCombinedEmbedding(output_dim=hidden_size,
                                          use_one_hot_embedding=use_one_hot_embedding,
-                                         dropout_rate=emb_dropout_rate,
                                          vocab_size=vocab_size,
                                          max_len=max_len,
                                          initializer_range=initializer_range,
                                          trainable_pos_embedding=trainable_pos_embedding,
-                                         layer_norm_epsilon=layer_norm_epsilon,
                                          name='embeddings')
+        self.embedding_dropout = tf.keras.layers.Dropout(rate=emb_dropout_rate, name='embeddings/dropout')
+        self.embedding_layer_norm = LayerNormalization(epsilon=layer_norm_epsilon,
+                                                       name='embeddings/LayerNorm')
         self.encoder = TransformerEncoder(hidden_size=hidden_size,
                                           intermediate_size=intermediate_size,
                                           num_hidden_layers=num_hidden_layers,
@@ -64,7 +74,8 @@ class BERT(tf.keras.layers.Layer):
              training: Optional[bool] = None,
              mask: Optional[bool] = None,
              **kwargs) -> tf.Tensor:
-        embed = self.emb(inputs)
+        embed = self.emb(inputs['segment_ids'], inputs['pos_ids'], inputs['token_ids'], mask=mask)
+        emb_norm_do = self.embedding_dropout(self.embedding_layer_norm(embed))
         attention_mask = self.create_self_attention_mask_from_input_mask(mask)
-        enc = self.encoder(inputs=embed, mask=attention_mask)
+        enc = self.encoder(inputs=emb_norm_do, mask=attention_mask)
         return self.pooler(enc)
