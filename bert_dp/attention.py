@@ -1,12 +1,13 @@
-from typing import Mapping, Optional, Tuple
+from typing import Sequence, Optional, Tuple
 
 import tensorflow as tf
 
 
-class MultiHeadAttention(tf.keras.layers.Layer):
+class MultiHeadSelfAttention(tf.keras.layers.Layer):
     def __init__(self,
                  hidden_size: int = 768,
                  num_heads: int = 12,
+                 attention_probs_dropout_prob: float = 0.1,
                  **kwargs) -> None:
         super().__init__(**kwargs)
 
@@ -15,11 +16,10 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         assert hidden_size % num_heads == 0
         self.depth = hidden_size // num_heads
 
-        # TODO: generalize naming to non-self attention
         self.wq = tf.keras.layers.Dense(hidden_size, name='self/query')
         self.wk = tf.keras.layers.Dense(hidden_size, name='self/key')
         self.wv = tf.keras.layers.Dense(hidden_size, name='self/value')
-
+        self.dropout = tf.keras.layers.Dropout(rate=attention_probs_dropout_prob)
         self.dense = tf.keras.layers.Dense(hidden_size, name='output/dense')
 
     def split_heads(self, x, batch_size):
@@ -31,16 +31,16 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         return tf.transpose(x, perm=[0, 2, 1, 3])
 
     def call(self,
-             inputs: Mapping[str, tf.Tensor],
+             x: tf.Tensor,
              training: Optional[bool] = None,
              mask: Optional[tf.Tensor] = None,
              **kwargs) -> Tuple[tf.Tensor, tf.Tensor]:
 
-        batch_size = tf.shape(inputs['query'])[0]
+        batch_size = tf.shape(x)[0]
 
-        q = self.wq(inputs['query'])  # (batch_size, seq_len, d_model)
-        k = self.wk(inputs['key'])  # (batch_size, seq_len, d_model)
-        v = self.wv(inputs['value'])  # (batch_size, seq_len, d_model)
+        q = self.wq(x)  # (batch_size, seq_len, d_model)
+        k = self.wk(x)  # (batch_size, seq_len, d_model)
+        v = self.wv(x)  # (batch_size, seq_len, d_model)
 
         q = self.split_heads(q, batch_size)  # (batch_size, num_heads, seq_len_q, depth)
         k = self.split_heads(k, batch_size)  # (batch_size, num_heads, seq_len_k, depth)
@@ -49,6 +49,10 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         # scaled_attention.shape == (batch_size, num_heads, seq_len_v, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
         scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
+
+        # This is actually dropping out entire tokens to attend to, which might
+        # seem a bit unusual, but is taken from the original Transformer paper.
+        attention_weights = self.dropout(attention_weights, training=training)
         scaled_attention = tf.transpose(scaled_attention,
                                         perm=[0, 2, 1, 3])  # (batch_size, seq_len_v, num_heads, depth)
 
@@ -60,8 +64,8 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
 
 def scaled_dot_product_attention(q, k, v, mask):
-    """Calculate the attention weights.
-    q, k, v must have matching leading dimensions.
+    """
+    Calculate the attention weights. q, k, v must have matching leading dimensions.
     The mask has shape depending on its type (padding / look-ahead) but it must be broadcastable for addition.
 
     Args:

@@ -1,4 +1,4 @@
-from typing import Mapping, Optional
+from typing import Optional
 
 import tensorflow as tf
 from tensorflow.python.eager import context
@@ -10,9 +10,10 @@ from tensorflow.python.ops import embedding_ops
 class BERTCombinedEmbedding(tf.keras.layers.Layer):
     """Embed token_type_ids, position_ids and token_ids and return the sum."""
     def __init__(self,
+                 vocab_size: int = 119547,
+                 sep_token_index: int = 103,
                  output_dim: int = 768,
                  use_one_hot_embedding: bool = False,  # currently is not used
-                 vocab_size: int = 119547,
                  max_len: int = 512,
                  initializer_range: float = 0.02,
                  trainable_pos_embedding: bool = True,  # always True in the original implementation
@@ -25,7 +26,7 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         self.embeddings_initializer = tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
 
     @tf_utils.shape_type_conversion
-    def build(self, input_shape):
+    def build(self, batch_input_shape):
         # Note: most sparse optimizers do not have GPU kernels defined. When
         # building graphs, the placement algorithm is able to place variables on CPU
         # since it knows all kernels using the variable only exist on CPU.
@@ -34,12 +35,14 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         # TPU codepaths which can handle sparse optimizers.
         if context.executing_eagerly() and context.context().num_gpus():
             with ops.device('cpu:0'):
-                self._create_weights(input_shape)
+                self.pos_idxs = tf.stack([tf.range(self.max_len) for _ in range(batch_input_shape[0])])
+                self._create_weights(batch_input_shape)
         else:
-            self._create_weights(input_shape)
+            self.pos_idxs = tf.stack([tf.range(self.max_len) for _ in range(batch_input_shape[0])])
+            self._create_weights(batch_input_shape)
         self.built = True
 
-    def _create_weights(self, input_shape):
+    def _create_weights(self, batch_input_shape):
         self.segment_matrix = self.add_weight(shape=(2, self.output_dim),
                                               initializer=self.embeddings_initializer,
                                               dtype=tf.float32,
@@ -54,17 +57,15 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
                                             name='word_embeddings')
 
     def call(self,
-             segment_ids,
-             pos_ids,
-             token_ids,
-             # inputs: Mapping[str, tf.Tensor],
+             token_ids: tf.Tensor,
              training: Optional[bool] = None,
              mask: Optional[tf.Tensor] = None,
              **kwargs) -> tf.Tensor:
-
+        # TODO: compute true segment_ids based on sep_token_index
+        segment_ids = tf.zeros_like(token_ids)
+        pos_embeddings = embedding_ops.embedding_lookup(self.pos_matrix, self.pos_idxs[:, :token_ids.shape[1]])
         # TODO: replace lookup with matrix multiplication for small vocabs
-        segment_embeddings = embedding_ops.embedding_lookup(self.segment_matrix, segment_ids)  # inputs['segment_ids'])
-        pos_embeddings = embedding_ops.embedding_lookup(self.pos_matrix, pos_ids)  # inputs['pos_ids'])
-        token_embeddings = embedding_ops.embedding_lookup(self.token_matrix, token_ids)  # inputs['token_ids'])
+        segment_embeddings = embedding_ops.embedding_lookup(self.segment_matrix, segment_ids)
+        token_embeddings = embedding_ops.embedding_lookup(self.token_matrix, token_ids)
 
-        return segment_embeddings + pos_embeddings + token_embeddings
+        return pos_embeddings + segment_embeddings + token_embeddings

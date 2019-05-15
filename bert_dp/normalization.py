@@ -19,7 +19,11 @@ class LayerNormalization(tf.keras.layers.Layer):
                                     trainable=True)
         super().build(input_shape)
 
-    def call(self, x, **kwargs):
+    def call(self,
+             x,
+             trainable=None,
+             mask=None,
+             **kwargs):
         u = tf.math.reduce_mean(x, axis=-1, keepdims=True)
         s = tf.math.reduce_mean(tf.math.square(x - u), axis=-1, keepdims=True)
         z = (x - u) / tf.math.sqrt(s + self.eps)
