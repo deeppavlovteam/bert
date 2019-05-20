@@ -22,11 +22,12 @@ class BERT(tf.keras.Model):
     def __init__(self,
                  vocab_size: int = 119547,
                  sep_token_index: int = 103,
+                 pad_token_index: int = 0,
                  emb_dropout_rate: float = 0.1,
                  max_len: int = 512,
                  use_one_hot_embedding: bool = False,
                  initializer_range: float = 0.02,
-                 trainable_pos_embedding: bool = True,  # always True in the original implementation
+                 trainable_pos_embedding: bool = True,
                  layer_norm_epsilon: float = 1e-12,
                  # https://github.com/tensorflow/tensorflow/blob/r1.13/tensorflow/contrib/layers/python/layers/layers.py#L2315
                  # is tf.keras version identical to the original layer_norm, which is copied above?
@@ -42,6 +43,7 @@ class BERT(tf.keras.Model):
                  **kwargs) -> None:
         super().__init__(**kwargs)
 
+        self.pad_token_index = pad_token_index
         self.emb = BERTCombinedEmbedding(vocab_size=vocab_size,
                                          sep_token_index=sep_token_index,
                                          output_dim=hidden_size,
@@ -87,12 +89,13 @@ class BERT(tf.keras.Model):
              training: Optional[bool] = None,
              mask: Optional[bool] = None,
              **kwargs) -> tf.Tensor:
-
+        if mask is None:
+            mask = tf.cast(tf.not_equal(inputs, self.pad_token_index), dtype=tf.int32)
         embed = self.emb(inputs, mask=mask)
         emb_norm_do = self.embedding_dropout(self.embedding_layer_norm(embed), training=training)
         attention_mask = self.create_self_attention_mask_from_input_mask(mask)
         enc = self.encoder(inputs=emb_norm_do, mask=attention_mask)
-        return self.pooler(enc)
+        return self.pooler(tf.squeeze(enc[:, 0:1, :], axis=1))
 
 
 class TransformerBlock(tf.keras.layers.Layer):
