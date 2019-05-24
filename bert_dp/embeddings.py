@@ -43,19 +43,20 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         self.built = True
 
     def _create_weights(self, batch_input_shape):
+        self.token_matrix = self.add_weight(shape=(self.vocab_size, self.output_dim),
+                                            initializer=self.embeddings_initializer,
+                                            dtype=tf.float32,
+                                            name='word_embeddings')
+
+        self.segment_matrix = self.add_weight(shape=(2, self.output_dim),  # TODO: generalize to more than 2 segments
+                                              initializer=self.embeddings_initializer,
+                                              dtype=tf.float32,
+                                              name='token_type_embeddings')
         self.pos_idxs = tf.stack([tf.range(self.max_len) for _ in range(batch_input_shape[0])])
         self.pos_matrix = self.add_weight(shape=(self.max_len, self.output_dim),
                                           initializer=self.embeddings_initializer,
                                           dtype=tf.float32,
                                           name='position_embeddings')
-        self.segment_matrix = self.add_weight(shape=(2, self.output_dim),  # TODO: generalize to more than 2 segments
-                                              initializer=self.embeddings_initializer,
-                                              dtype=tf.float32,
-                                              name='token_type_embeddings')
-        self.token_matrix = self.add_weight(shape=(self.vocab_size, self.output_dim),
-                                            initializer=self.embeddings_initializer,
-                                            dtype=tf.float32,
-                                            name='word_embeddings')
 
     def call(self,
              token_ids: tf.Tensor,

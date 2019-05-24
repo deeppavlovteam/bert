@@ -9,19 +9,17 @@ class LayerNormalization(tf.keras.layers.Layer):
         self.eps = tf.constant(epsilon, dtype=tf.float32)
 
     def build(self, input_shape):
-        self.gamma = self.add_weight(name='gamma',
-                                     shape=input_shape[-1:],
-                                     initializer=tf.keras.initializers.Ones(),
-                                     trainable=True)
         self.beta = self.add_weight(name='beta',
                                     shape=input_shape[-1:],
-                                    initializer=tf.keras.initializers.Zeros(),
-                                    trainable=True)
+                                    initializer=tf.keras.initializers.Zeros())
+        self.gamma = self.add_weight(name='gamma',
+                                     shape=input_shape[-1:],
+                                     initializer=tf.keras.initializers.Ones())
         super().build(input_shape)
 
     def call(self,
              x,
-             trainable=None,
+             training=None,
              mask=None,
              **kwargs):
         u = tf.math.reduce_mean(x, axis=-1, keepdims=True)
