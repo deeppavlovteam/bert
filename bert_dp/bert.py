@@ -3,7 +3,7 @@ from typing import Optional, Union
 import tensorflow as tf
 
 from .embeddings import BERTCombinedEmbedding
-from .attention import MultiHeadSelfAttention
+from .attention import MultiHeadAttention, MultiHeadSelfAttention
 from .activations import gelu
 
 # from .normalization import LayerNormalization
@@ -79,19 +79,19 @@ class BERT(tf.keras.Model):
 
         self.pooler = tf.keras.layers.Dense(pooler_fc_size, activation='tanh', trainable=trainable, name='pooler/dense')
 
-    # @staticmethod
-    # def create_self_attention_mask_from_input_mask(input_mask):
-    #     """
-    #     Create 4D self attention mask (inverted, in order to simplify logits addition) from a 2D input mask.
-    #
-    #     Args:
-    #         input_mask: 2D int tf.Tensor of shape [batch_size, seq_length].
-    #
-    #     Returns:
-    #         float tf.Tensor of shape [batch_size, 1, 1, seq_length].
-    #     """
-    #     inverted_mask = tf.cast(tf.math.equal(input_mask, 0), tf.float32)
-    #     return inverted_mask[:, tf.newaxis, tf.newaxis, :]
+    @staticmethod
+    def create_self_attention_mask_from_input_mask(input_mask):
+        """
+        Create 4D self attention mask (inverted, in order to simplify logits addition) from a 2D input mask.
+
+        Args:
+            input_mask: 2D int tf.Tensor of shape [batch_size, seq_length].
+
+        Returns:
+            float tf.Tensor of shape [batch_size, 1, 1, seq_length].
+        """
+        inverted_mask = tf.cast(tf.math.equal(input_mask, 0), tf.float32)
+        return inverted_mask[:, tf.newaxis, tf.newaxis, :]
 
     def call(self,
              inputs: tf.Tensor,
@@ -102,8 +102,8 @@ class BERT(tf.keras.Model):
             mask = tf.cast(tf.not_equal(inputs, self.pad_token_index), dtype=tf.int32)
         embed = self.emb(inputs, training=training, mask=mask)
         emb_norm_do = self.embedding_dropout(self.embedding_layer_norm(embed), training=training)
-        # attention_mask = self.create_self_attention_mask_from_input_mask(mask)
-        enc = self.encoder(inputs=emb_norm_do, training=training, mask=mask)
+        attention_mask = self.create_self_attention_mask_from_input_mask(mask)
+        enc = self.encoder(inputs=emb_norm_do, training=training, mask=attention_mask)
         po = self.pooler(tf.squeeze(enc[:, 0:1, :], axis=1))
 
         if self.return_stack is None:
@@ -126,10 +126,10 @@ class TransformerBlock(tf.keras.layers.Layer):
                  **kwargs) -> None:
         super().__init__(**kwargs)
 
-        self.mhsa = MultiHeadSelfAttention(hidden_size=hidden_size,
-                                           num_heads=num_heads,
-                                           attention_probs_dropout_prob=attention_probs_dropout_prob,
-                                           name='attention')
+        self.mhsa = MultiHeadAttention(hidden_size=hidden_size,
+                                       num_heads=num_heads,
+                                       attention_probs_dropout_prob=attention_probs_dropout_prob,
+                                       name='attention')
 
         self.dense = tf.keras.layers.Dense(units=hidden_size, name='attention/output/dense')
 
@@ -153,7 +153,7 @@ class TransformerBlock(tf.keras.layers.Layer):
              mask: Optional[bool] = None,
              **kwargs) -> tf.Tensor:
 
-        attn_output = self.mhsa(inputs, mask=mask)  # (batch_size, input_seq_len, d_model)
+        attn_output = self.mhsa(inputs, inputs, inputs, mask=mask)  # (batch_size, input_seq_len, d_model)
         attn_output = self.dropout1(self.dense(attn_output), training=training)
         out1 = self.layernorm1(inputs + attn_output)  # (batch_size, input_seq_len, d_model)
 
