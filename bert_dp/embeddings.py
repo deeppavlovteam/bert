@@ -11,6 +11,7 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
     """Embed token_type_ids, position_ids and token_ids and return the sum."""
     def __init__(self,
                  vocab_size: int = 119547,
+                 token_type_vocab_size: int = 2,
                  sep_token_index: int = 103,
                  output_dim: int = 768,
                  use_one_hot_embedding: bool = False,  # currently is not used
@@ -21,10 +22,12 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         super().__init__(**kwargs)
 
         self.vocab_size = vocab_size
+        self.token_type_vocab_size = token_type_vocab_size
         self.sep_token_index = sep_token_index
         self.output_dim = output_dim
         self.max_len = max_len
         self.embeddings_initializer = tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
+        self.trainable_pos_embedding = trainable_pos_embedding
 
     @tf_utils.shape_type_conversion
     def build(self, batch_input_shape):
@@ -43,32 +46,43 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         self.built = True
 
     def _create_weights(self, batch_input_shape):
-        self.token_matrix = self.add_weight(shape=(self.vocab_size, self.output_dim),
-                                            initializer=self.embeddings_initializer,
-                                            dtype=tf.float32,
-                                            name='word_embeddings')
+        self.token_emb_table = self.add_weight(shape=(self.vocab_size, self.output_dim),
+                                               dtype=tf.float32,
+                                               initializer=self.embeddings_initializer,
+                                               name='word_embeddings')
 
-        self.segment_matrix = self.add_weight(shape=(2, self.output_dim),  # TODO: generalize to more than 2 segments
-                                              initializer=self.embeddings_initializer,
-                                              dtype=tf.float32,
-                                              name='token_type_embeddings')
-        self.pos_idxs = tf.stack([tf.range(self.max_len) for _ in range(batch_input_shape[0])])
-        self.pos_matrix = self.add_weight(shape=(self.max_len, self.output_dim),
-                                          initializer=self.embeddings_initializer,
-                                          dtype=tf.float32,
-                                          name='position_embeddings')
+        self.token_type_emb_table = self.add_weight(shape=(self.token_type_vocab_size, self.output_dim),
+                                                    dtype=tf.float32,
+                                                    initializer=self.embeddings_initializer,
+                                                    name='token_type_embeddings')
+        self.full_position_emb_table = self.add_weight(shape=(self.max_len, self.output_dim),
+                                                       dtype=tf.float32,
+                                                       initializer=self.embeddings_initializer,
+                                                       trainable=self.trainable_pos_embedding,
+                                                       name='position_embeddings')
 
     def call(self,
              token_ids: tf.Tensor,
              training: Optional[bool] = None,
-             mask: Optional[tf.Tensor] = None,
+             # mask: Optional[tf.Tensor] = None,
              **kwargs) -> tf.Tensor:
 
-        pos_embeddings = embedding_ops.embedding_lookup(self.pos_matrix, self.pos_idxs[:, :token_ids.shape[1]])
-        # TODO: replace lookup with matrix multiplication for small vocabs
+        token_emb = embedding_ops.embedding_lookup(self.token_emb_table, token_ids)
+
+        pos_emb = tf.slice(self.full_position_emb_table,
+                           begin=[0, 0], size=[token_ids.shape[1], -1])
+
         sep_ids = tf.cast(tf.equal(token_ids, self.sep_token_index), dtype=tf.int32)
         segment_ids = tf.cumsum(sep_ids, axis=1) - sep_ids
-        segment_embeddings = embedding_ops.embedding_lookup(self.segment_matrix, segment_ids)
-        token_embeddings = embedding_ops.embedding_lookup(self.token_matrix, token_ids)
 
-        return pos_embeddings + segment_embeddings + token_embeddings
+        # This vocab will be small so we always do one-hot here, since it is always
+        # faster for a small vocabulary.
+        flat_segment_ids = tf.reshape(segment_ids, [-1])
+        oh_segment_ids = tf.one_hot(flat_segment_ids, depth=self.token_type_vocab_size)
+        segment_emb = tf.matmul(oh_segment_ids, self.token_type_emb_table)
+        segment_emb = tf.reshape(segment_emb, token_emb.shape)
+
+        return token_emb + pos_emb + segment_emb
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0], self.max_len, self.output_dim

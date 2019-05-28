@@ -23,6 +23,7 @@ class BERT(tf.keras.Model):
     def __init__(self,
                  return_stack: Optional[bool] = None,
                  vocab_size: int = 119547,
+                 token_type_vocab_size: int = 2,
                  sep_token_index: int = 103,
                  pad_token_index: int = 0,
                  emb_dropout_rate: float = 0.1,  # equal to hidden_dropout_prob in the original implementation
@@ -51,6 +52,7 @@ class BERT(tf.keras.Model):
         with tf.name_scope('embeddings'):
             self.emb = BERTCombinedEmbedding(#input_shape=max_len,
                                              vocab_size=vocab_size,
+                                             token_type_vocab_size=token_type_vocab_size,
                                              sep_token_index=sep_token_index,
                                              output_dim=hidden_size,
                                              use_one_hot_embedding=use_one_hot_embedding,
@@ -77,33 +79,35 @@ class BERT(tf.keras.Model):
                                                       trainable=trainable,
                                                       name=f'layer_{i}'))
 
-        self.pooler = tf.keras.layers.Dense(pooler_fc_size, activation='tanh', trainable=trainable, name='pooler/dense')
+        self.pooler = tf.keras.layers.Dense(pooler_fc_size, activation='tanh', name='pooler/dense')
 
-    @staticmethod
-    def create_self_attention_mask_from_input_mask(input_mask):
-        """
-        Create 4D self attention mask (inverted, in order to simplify logits addition) from a 2D input mask.
-
-        Args:
-            input_mask: 2D int tf.Tensor of shape [batch_size, seq_length].
-
-        Returns:
-            float tf.Tensor of shape [batch_size, 1, 1, seq_length].
-        """
-        inverted_mask = tf.cast(tf.math.equal(input_mask, 0), tf.float32)
-        return inverted_mask[:, tf.newaxis, tf.newaxis, :]
+    # @staticmethod
+    # def create_self_attention_mask_from_input_mask(input_mask):
+    #     """
+    #     Create 4D self attention mask (inverted, in order to simplify logits addition) from a 2D input mask.
+    #
+    #     Args:
+    #         input_mask: 2D int tf.Tensor of shape [batch_size, seq_length].
+    #
+    #     Returns:
+    #         float tf.Tensor of shape [batch_size, 1, seq_length, 1].
+    #     """
+    #     # inverted_mask = tf.cast(, tf.float32)
+    #     return tf.cast(input_mask, tf.float32)[:, tf.newaxis, tf.newaxis, :]
 
     def call(self,
              inputs: tf.Tensor,
              training: Optional[bool] = None,
              mask: Optional[bool] = None,
              **kwargs) -> tf.Tensor:
-        if mask is None:
-            mask = tf.cast(tf.not_equal(inputs, self.pad_token_index), dtype=tf.int32)
-        embed = self.emb(inputs, training=training, mask=mask)
+
+        embed = self.emb(inputs, training=training)
         emb_norm_do = self.embedding_dropout(self.embedding_layer_norm(embed), training=training)
-        attention_mask = self.create_self_attention_mask_from_input_mask(mask)
-        enc = self.encoder(inputs=emb_norm_do, training=training, mask=attention_mask)
+
+        # attention_mask = self.create_self_attention_mask_from_input_mask(mask)
+        if mask is None:
+            mask = tf.cast(tf.not_equal(inputs, self.pad_token_index), tf.int32)
+        enc = self.encoder(inputs=emb_norm_do, training=training, mask=mask)
         po = self.pooler(tf.squeeze(enc[:, 0:1, :], axis=1))
 
         if self.return_stack is None:
@@ -153,12 +157,21 @@ class TransformerBlock(tf.keras.layers.Layer):
              mask: Optional[bool] = None,
              **kwargs) -> tf.Tensor:
 
-        attn_output = self.mhsa(inputs, inputs, inputs, mask=mask)  # (batch_size, input_seq_len, d_model)
+        attn_output = self.mhsa(inputs, inputs, inputs, mask=mask)
         attn_output = self.dropout1(self.dense(attn_output), training=training)
-        out1 = self.layernorm1(inputs + attn_output)  # (batch_size, input_seq_len, d_model)
+        out1 = self.layernorm1(inputs + attn_output)
 
-        ffn_output = self.pff2(self.pff1(out1))  # (batch_size, input_seq_len, d_model)
+        ffn_output = self.pff2(self.pff1(out1))
         ffn_output = self.dropout2(ffn_output, training=training)
-        out2 = self.layernorm2(out1 + ffn_output)  # (batch_size, input_seq_len, d_model)
+        out2 = self.layernorm2(out1 + ffn_output)
 
+        out2._keras_mask = mask  # workaround for mask propagation
         return out2
+
+    def compute_mask(self,
+                     inputs: tf.Tensor,
+                     mask: Optional[tf.Tensor] = None) -> Optional[tf.Tensor]:
+        return mask
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
