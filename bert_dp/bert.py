@@ -24,7 +24,7 @@ class BERT(tf.keras.Model):
                  return_stack: Optional[bool] = None,
                  vocab_size: int = 119547,
                  token_type_vocab_size: int = 2,
-                 sep_token_index: int = 103,
+                 sep_token_index: int = 102,
                  pad_token_index: int = 0,
                  emb_dropout_rate: float = 0.1,  # equal to hidden_dropout_prob in the original implementation
                  max_len: int = 512,

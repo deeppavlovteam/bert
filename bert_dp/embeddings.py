@@ -12,7 +12,7 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
     def __init__(self,
                  vocab_size: int = 119547,
                  token_type_vocab_size: int = 2,
-                 sep_token_index: int = 103,
+                 sep_token_index: int = 102,
                  output_dim: int = 768,
                  use_one_hot_embedding: bool = False,  # currently is not used
                  max_len: int = 512,
@@ -67,10 +67,13 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
              # mask: Optional[tf.Tensor] = None,
              **kwargs) -> tf.Tensor:
 
-        token_emb = embedding_ops.embedding_lookup(self.token_emb_table, token_ids)
+        # TODO: maybe add type checking
+        token_emb = embedding_ops.embedding_lookup(self.token_emb_table, tf.cast(token_ids, tf.int32))
 
-        pos_emb = tf.slice(self.full_position_emb_table,
-                           begin=[0, 0], size=[token_ids.shape[1], -1])
+        # pos_emb = tf.slice(self.full_position_emb_table,
+        #                    begin=[0, 0], size=[token_ids.shape.as_list()[1], -1])
+        # TODO: try to generalize to dynamic sequence length dimension
+        pos_emb = self.full_position_emb_table[:token_ids.shape[1], :]
 
         sep_ids = tf.cast(tf.equal(token_ids, self.sep_token_index), dtype=tf.int32)
         segment_ids = tf.cumsum(sep_ids, axis=1) - sep_ids
@@ -80,7 +83,8 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         flat_segment_ids = tf.reshape(segment_ids, [-1])
         oh_segment_ids = tf.one_hot(flat_segment_ids, depth=self.token_type_vocab_size)
         segment_emb = tf.matmul(oh_segment_ids, self.token_type_emb_table)
-        segment_emb = tf.reshape(segment_emb, token_emb.shape)
+        # TODO: try to generalize to dynamic sequence length dimension
+        segment_emb = tf.reshape(segment_emb, [-1] + token_emb.shape.as_list()[1:])
 
         return token_emb + pos_emb + segment_emb
 
