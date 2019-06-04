@@ -12,11 +12,6 @@ try:
 except ImportError:
     from .normalization import LayerNormalization
 
-# def layer_norm(input_tensor, name=None):
-#   """Run layer normalization on the last dimension of the tensor."""
-#   return tf.contrib.layers.layer_norm(
-#       inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
-
 
 class BERT(tf.keras.Model):
     """BERT body"""
@@ -33,9 +28,7 @@ class BERT(tf.keras.Model):
                  trainable_pos_embedding: bool = True,
                  layer_norm_epsilon: float = 1e-12,
                  # https://github.com/tensorflow/tensorflow/blob/r1.13/tensorflow/contrib/layers/python/layers/layers.py#L2315
-                 # is tf.keras version identical to the original layer_norm, which is copied above?
                  hidden_size: int = 768,
-
                  intermediate_size: int = 3072,
                  num_hidden_layers: int = 12,
                  num_heads: int = 12,
@@ -50,8 +43,7 @@ class BERT(tf.keras.Model):
         self.return_stack = return_stack
         self.pad_token_index = pad_token_index
         with tf.name_scope('embeddings'):
-            self.emb = BERTCombinedEmbedding(#input_shape=max_len,
-                                             vocab_size=vocab_size,
+            self.emb = BERTCombinedEmbedding(vocab_size=vocab_size,
                                              token_type_vocab_size=token_type_vocab_size,
                                              sep_token_index=sep_token_index,
                                              output_dim=hidden_size,
@@ -165,7 +157,7 @@ class TransformerBlock(tf.keras.layers.Layer):
         ffn_output = self.dropout2(ffn_output, training=training)
         out2 = self.layernorm2(out1 + ffn_output)
 
-        out2._keras_mask = mask  # workaround for mask propagation
+        out2._keras_mask = mask  # workaround for mask propagation  # TODO: get rid of this
         return out2
 
     def compute_mask(self,
