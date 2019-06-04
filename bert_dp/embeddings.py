@@ -7,7 +7,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import embedding_ops
 
 
-class BERTCombinedEmbedding(tf.keras.layers.Layer):
+class AdvancedEmbedding(tf.keras.layers.Layer):
     """Calculate token type ids and return the sum of subword-token, positional end token-type embeddings."""
     # TODO: maybe break down this class into the three distinct
     def __init__(self,
@@ -46,6 +46,7 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         self.built = True
 
     def _create_weights(self, batch_input_shape):
+
         self.token_emb_table = self.add_weight(shape=(self.vocab_size, self.output_dim),
                                                dtype=tf.float32,
                                                initializer=self.embeddings_initializer,
@@ -55,6 +56,10 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
                                                     dtype=tf.float32,
                                                     initializer=self.embeddings_initializer,
                                                     name='token_type_embeddings')
+
+        # Since the position embedding table is a learned variable, we create it using a (long) sequence length
+        # `max_len`. The actual sequence length might be shorter than this, for faster training of
+        # tasks that do not have long sequences.
         self.full_position_emb_table = self.add_weight(shape=(self.max_len, self.output_dim),
                                                        dtype=tf.float32,
                                                        initializer=self.embeddings_initializer,
@@ -64,11 +69,14 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
     def call(self,
              token_ids: tf.Tensor,
              training: Optional[bool] = None,
-             # mask: Optional[tf.Tensor] = None,  # TODO: resolve mask propagation issues
+             mask: Optional[tf.Tensor] = None,
              **kwargs) -> tf.Tensor:
 
         token_emb = embedding_ops.embedding_lookup(self.token_emb_table, tf.cast(token_ids, tf.int32))
 
+        # So `full_position_embeddings_table` is effectively an embedding table for position
+        # [0, 1, 2, ..., max_position_embeddings-1], and the current sequence has positions [0, 1, 2, ... seq_length-1],
+        # so we can just perform a slice.
         pos_emb = self.full_position_emb_table[:tf.shape(token_ids)[1], :]
 
         sep_ids = tf.cast(tf.equal(token_ids, self.sep_token_index), dtype=tf.int32)
@@ -83,4 +91,4 @@ class BERTCombinedEmbedding(tf.keras.layers.Layer):
         return token_emb + pos_emb + segment_emb
 
     def compute_output_shape(self, input_shape):
-        return input_shape[0], self.max_len, self.output_dim
+        return input_shape[0], input_shape[1], self.output_dim

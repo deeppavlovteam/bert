@@ -1,9 +1,10 @@
 from typing import Optional, Union
 
 import tensorflow as tf
+from tensorflow.python.keras.engine.network import Network
 
-from .embeddings import BERTCombinedEmbedding
-from .attention import MultiHeadAttention, MultiHeadSelfAttention
+from .embeddings import AdvancedEmbedding
+from .attention import MultiHeadSelfAttention
 from .activations import gelu
 
 # from .normalization import LayerNormalization
@@ -13,7 +14,7 @@ except ImportError:
     from .normalization import LayerNormalization
 
 
-class BERT(tf.keras.Model):
+class BERT(Network):
     """BERT body"""
     def __init__(self,
                  return_stack: Optional[bool] = None,
@@ -33,7 +34,7 @@ class BERT(tf.keras.Model):
                  num_hidden_layers: int = 12,
                  num_heads: int = 12,
                  hidden_dropout_prob: float = 0.1,
-                 attention_probs_dropout_prob: float = 0.1,  # TODO: clarify usage of this parameter
+                 attention_probs_dropout_prob: float = 0.1,
                  intermediate_act_fn: Union[str, callable] = gelu,
                  pooler_fc_size: int = 768,
                  trainable: bool = True,
@@ -42,20 +43,21 @@ class BERT(tf.keras.Model):
 
         self.return_stack = return_stack
         self.pad_token_index = pad_token_index
+
+        # use name scopes for compatibility with both eager and graph modes
         with tf.name_scope('embeddings'):
-            self.emb = BERTCombinedEmbedding(vocab_size=vocab_size,
-                                             token_type_vocab_size=token_type_vocab_size,
-                                             sep_token_index=sep_token_index,
-                                             output_dim=hidden_size,
-                                             use_one_hot_embedding=use_one_hot_embedding,
-                                             max_len=max_len,
-                                             initializer_range=initializer_range,
-                                             trainable_pos_embedding=trainable_pos_embedding,
-                                             trainable=trainable,
-                                             name='embeddings')
-            self.embedding_dropout = tf.keras.layers.Dropout(rate=emb_dropout_rate, name='embeddings/dropout')
-            self.embedding_layer_norm = LayerNormalization(epsilon=layer_norm_epsilon,
-                                                           name='embeddings/LayerNorm')
+            self.embed = AdvancedEmbedding(vocab_size=vocab_size,
+                                           token_type_vocab_size=token_type_vocab_size,
+                                           sep_token_index=sep_token_index,
+                                           output_dim=hidden_size,
+                                           use_one_hot_embedding=use_one_hot_embedding,
+                                           max_len=max_len,
+                                           initializer_range=initializer_range,
+                                           trainable_pos_embedding=trainable_pos_embedding,
+                                           trainable=trainable,
+                                           name='embeddings')
+            self.embed_dropout = tf.keras.layers.Dropout(rate=emb_dropout_rate, name='embeddings/dropout')
+            self.embed_layer_norm = LayerNormalization(epsilon=layer_norm_epsilon, name='embeddings/LayerNorm')
 
         with tf.name_scope('encoder'):
             self.encoder = tf.keras.Sequential(name='encoder')
@@ -73,39 +75,26 @@ class BERT(tf.keras.Model):
 
         self.pooler = tf.keras.layers.Dense(pooler_fc_size, activation='tanh', name='pooler/dense')
 
-    # @staticmethod
-    # def create_self_attention_mask_from_input_mask(input_mask):
-    #     """
-    #     Create 4D self attention mask (inverted, in order to simplify logits addition) from a 2D input mask.
-    #
-    #     Args:
-    #         input_mask: 2D int tf.Tensor of shape [batch_size, seq_length].
-    #
-    #     Returns:
-    #         float tf.Tensor of shape [batch_size, 1, seq_length, 1].
-    #     """
-    #     # inverted_mask = tf.cast(, tf.float32)
-    #     return tf.cast(input_mask, tf.float32)[:, tf.newaxis, tf.newaxis, :]
-
     def call(self,
              inputs: tf.Tensor,
              training: Optional[bool] = None,
              mask: Optional[bool] = None,
              **kwargs) -> tf.Tensor:
 
-        embed = self.emb(inputs, training=training)
-        emb_norm_do = self.embedding_dropout(self.embedding_layer_norm(embed), training=training)
+        emb = self.embed(inputs, training=training)
+        emb_norm_do = self.embed_dropout(self.embed_layer_norm(emb), training=training)
 
-        # attention_mask = self.create_self_attention_mask_from_input_mask(mask)
+        # always compute mask if it is not provided
         if mask is None:
             mask = tf.cast(tf.not_equal(inputs, self.pad_token_index), tf.int32)
-        enc = self.encoder(inputs=emb_norm_do, training=training, mask=mask)
+        enc = self.encoder(emb_norm_do, training=training, mask=mask)
         po = self.pooler(tf.squeeze(enc[:, 0:1, :], axis=1))
 
         if self.return_stack is None:
             return po
         elif self.return_stack:
-            raise NotImplementedError('Currently all encoder layers output could not be obtained')
+            raise NotImplementedError('Currently all encoder layers output could not be obtained. You can get '
+                                      'sequence output from the last encoder layer setting return_stack to False')
         else:
             return enc
 
@@ -116,23 +105,21 @@ class TransformerBlock(tf.keras.layers.Layer):
                  intermediate_size: int = 3072,
                  num_heads: int = 12,
                  hidden_dropout_prob: float = 0.1,
-                 attention_probs_dropout_prob: float = 0.0,
+                 attention_probs_dropout_prob: float = 0.1,
                  intermediate_act_fn: Union[str, callable] = gelu,
                  layer_norm_epsilon: float = 1e-12,
                  **kwargs) -> None:
         super().__init__(**kwargs)
 
-        self.mhsa = MultiHeadAttention(hidden_size=hidden_size,
-                                       num_heads=num_heads,
-                                       attention_probs_dropout_prob=attention_probs_dropout_prob,
-                                       name='attention')
+        self.mhsa = MultiHeadSelfAttention(hidden_size=hidden_size,
+                                           num_heads=num_heads,
+                                           attention_probs_dropout_prob=attention_probs_dropout_prob,
+                                           name='attention')
 
         self.dense = tf.keras.layers.Dense(units=hidden_size, name='attention/output/dense')
 
-        self.dropout1 = tf.keras.layers.Dropout(rate=hidden_dropout_prob,
-                                                name='attention/output/dropout')
-        self.layernorm1 = LayerNormalization(epsilon=layer_norm_epsilon,
-                                             name='attention/output/LayerNorm')
+        self.dropout1 = tf.keras.layers.Dropout(rate=hidden_dropout_prob, name='attention/output/dropout')
+        self.layernorm1 = LayerNormalization(epsilon=layer_norm_epsilon, name='attention/output/LayerNorm')
 
         # point-wise feed forward network
         self.pff1 = tf.keras.layers.Dense(units=intermediate_size,
@@ -149,7 +136,7 @@ class TransformerBlock(tf.keras.layers.Layer):
              mask: Optional[bool] = None,
              **kwargs) -> tf.Tensor:
 
-        attn_output = self.mhsa(inputs, inputs, inputs, mask=mask)
+        attn_output = self.mhsa(inputs, mask=mask)
         attn_output = self.dropout1(self.dense(attn_output), training=training)
         out1 = self.layernorm1(inputs + attn_output)
 

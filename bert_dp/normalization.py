@@ -2,6 +2,7 @@ import tensorflow as tf
 
 
 class LayerNormalization(tf.keras.layers.Layer):
+    """Layer that normalize outputs to statistics aggregated across hidden dimension"""
     def __init__(self,
                  epsilon=1e-12,
                  **kwargs) -> None:
