@@ -88,6 +88,8 @@ class BERT(Network):
         if mask is None:
             mask = tf.cast(tf.not_equal(inputs, self.pad_token_index), tf.int32)
         enc = self.encoder(emb_norm_do, training=training, mask=mask)
+        # For classification tasks, the first vector (corresponding to [CLS]) is used as the "sentence vector". Note
+        # that this only makes sense because the entire model is fine-tuned.
         po = self.pooler(tf.squeeze(enc[:, 0:1, :], axis=1))
 
         if self.return_stack is None:

@@ -36,7 +36,8 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
     def call(self,
              x: tf.Tensor,
              training: Optional[bool] = None,
-             mask: Optional[tf.Tensor] = None) -> None:
+             mask: Optional[tf.Tensor] = None,
+             **kwargs) -> None:
 
         batch_size = tf.shape(x)[0]
 
@@ -79,5 +80,5 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
                      mask: Optional[tf.Tensor] = None) -> Optional[tf.Tensor]:
         return mask
 
-    def compute_output_shape(self, input_shape):
+    def compute_output_shape(self, input_shape: tf.TensorShape) -> tf.TensorShape:
         return input_shape

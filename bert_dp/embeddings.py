@@ -79,6 +79,18 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
         # so we can just perform a slice.
         pos_emb = self.full_position_emb_table[:tf.shape(token_ids)[1], :]
 
+        # The convention in BERT is:
+        # (a) For sequence pairs:
+        #  tokens:   [CLS] is this jack ##son ##ville ? [SEP] no it is not . [SEP]
+        #  type_ids: 0     0  0    0    0     0       0 0     1  1  1  1   1 1
+        # (b) For single sequences:
+        #  tokens:   [CLS] the dog is hairy . [SEP]
+        #  type_ids: 0     0   0   0  0     0 0
+        #
+        # Where "type_ids" are used to indicate whether this is the first sequence or the second sequence. The embedding
+        # vectors for `type=0` and `type=1` were learned during pre-training and are added to the wordpiece embedding
+        # vector (and position vector). This is not *strictly* necessary since the [SEP] token unambiguously separates
+        # the sequences, but it makes it easier for the model to learn the concept of sequences.
         sep_ids = tf.cast(tf.equal(token_ids, self.sep_token_index), dtype=tf.int32)
         segment_ids = tf.cumsum(sep_ids, axis=1) - sep_ids
         # This vocab will be small so we always do one-hot here, since it is always

@@ -8,7 +8,7 @@ from tensorflow.python.keras.utils import metrics_utils
 from tensorflow.python.keras.metrics import Metric
 
 
-class BinaryF1Score(Metric):
+class SparseBinaryF1Score(Metric):
 
     def __new__(cls, *args, **kwargs):
         # don't look at this
@@ -20,7 +20,7 @@ class BinaryF1Score(Metric):
 
     def __init__(self):
 
-        super(BinaryF1Score, self).__init__()
+        super(SparseBinaryF1Score, self).__init__()
 
         default_threshold = 0.5
         self.thresholds = metrics_utils.parse_init_thresholds(None, default_threshold=default_threshold)
@@ -35,6 +35,7 @@ class BinaryF1Score(Metric):
                                   initializer=init_ops.zeros_initializer)
 
     def update_state(self, y_true, y_pred, sample_weight=None):
+        y_pred_ = tf.math.reduce_max(y_pred, axis=-1, keepdims=True)
         return metrics_utils.update_confusion_matrix_variables(
             {
                 metrics_utils.ConfusionMatrix.TRUE_POSITIVES: self.tp,
@@ -42,7 +43,7 @@ class BinaryF1Score(Metric):
                 metrics_utils.ConfusionMatrix.FALSE_NEGATIVES: self.fn
             },
             y_true,
-            y_pred,
+            y_pred_,
             thresholds=self.thresholds,
             top_k=None,
             class_id=None,
