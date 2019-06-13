@@ -15,7 +15,7 @@ except ImportError:
 
 
 class BERT(Network):
-    """BERT body"""
+    """BERT body (implemented as a Network subclass in order to have weight-(de)serialization methods."""
     def __init__(self,
                  return_stack: Optional[bool] = None,
                  vocab_size: int = 119547,
@@ -41,6 +41,8 @@ class BERT(Network):
                  **kwargs) -> None:
         super().__init__(**kwargs)
 
+        self.supports_masking = True
+
         self.return_stack = return_stack
         self.pad_token_index = pad_token_index
 
@@ -56,8 +58,12 @@ class BERT(Network):
                                            trainable_pos_embedding=trainable_pos_embedding,
                                            trainable=trainable,
                                            name='embeddings')
-            self.embed_dropout = tf.keras.layers.Dropout(rate=emb_dropout_rate, name='embeddings/dropout')
-            self.embed_layer_norm = LayerNormalization(epsilon=layer_norm_epsilon, name='embeddings/LayerNorm')
+            self.embed_dropout = tf.keras.layers.Dropout(rate=emb_dropout_rate,
+                                                         trainable=trainable,
+                                                         name='embeddings/dropout')
+            self.embed_layer_norm = LayerNormalization(epsilon=layer_norm_epsilon,
+                                                       trainable=trainable,
+                                                       name='embeddings/LayerNorm')
 
         with tf.name_scope('encoder'):
             self.encoder = tf.keras.Sequential(name='encoder')
@@ -73,7 +79,7 @@ class BERT(Network):
                                                       trainable=trainable,
                                                       name=f'layer_{i}'))
 
-        self.pooler = tf.keras.layers.Dense(pooler_fc_size, activation='tanh', name='pooler/dense')
+        self.pooler = tf.keras.layers.Dense(pooler_fc_size, activation='tanh', trainable=trainable, name='pooler/dense')
 
     def call(self,
              inputs: tf.Tensor,
@@ -110,12 +116,16 @@ class TransformerBlock(tf.keras.layers.Layer):
                  attention_probs_dropout_prob: float = 0.1,
                  intermediate_act_fn: Union[str, callable] = gelu,
                  layer_norm_epsilon: float = 1e-12,
+                 trainable: bool = True,
                  **kwargs) -> None:
         super().__init__(**kwargs)
+
+        self.supports_masking = True
 
         self.mhsa = MultiHeadSelfAttention(hidden_size=hidden_size,
                                            num_heads=num_heads,
                                            attention_probs_dropout_prob=attention_probs_dropout_prob,
+                                           trainable=trainable,
                                            name='attention')
 
         self.dense = tf.keras.layers.Dense(units=hidden_size, name='attention/output/dense')
@@ -146,7 +156,7 @@ class TransformerBlock(tf.keras.layers.Layer):
         ffn_output = self.dropout2(ffn_output, training=training)
         out2 = self.layernorm2(out1 + ffn_output)
 
-        out2._keras_mask = mask  # workaround for mask propagation  # TODO: get rid of this
+        out2._keras_mask = mask  # workaround for mask propagation  # TODO: investigate self.supports_masking usage
         return out2
 
     def compute_mask(self,

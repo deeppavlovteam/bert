@@ -13,6 +13,8 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
                  **kwargs) -> None:
         super().__init__(**kwargs)
 
+        self.supports_masking = True
+
         self.num_heads = num_heads
         self.hidden_size = hidden_size
         self.neg_inf = neg_inf

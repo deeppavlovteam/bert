@@ -9,6 +9,9 @@ class LayerNormalization(tf.keras.layers.Layer):
                  epsilon=1e-12,
                  **kwargs) -> None:
         super().__init__(**kwargs)
+
+        self.supports_masking = True
+
         self.eps = tf.constant(epsilon, dtype=tf.float32)
 
     def build(self, input_shape: tf.TensorShape) -> None:

@@ -30,6 +30,8 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
         self.embeddings_initializer = tf.keras.initializers.TruncatedNormal(stddev=initializer_range)
         self.trainable_pos_embedding = trainable_pos_embedding
 
+        self.supports_masking = True
+
     @tf_utils.shape_type_conversion
     def build(self, batch_input_shape):
         # Note: most sparse optimizers do not have GPU kernels defined. When
@@ -101,6 +103,11 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
         segment_emb = tf.reshape(segment_emb, tf.shape(token_emb))
 
         return token_emb + pos_emb + segment_emb
+
+    def compute_mask(self,
+                     inputs: tf.Tensor,
+                     mask: Optional[tf.Tensor] = None) -> Optional[tf.Tensor]:
+        return mask
 
     def compute_output_shape(self, input_shape):
         return input_shape[0], input_shape[1], self.output_dim
