@@ -4,7 +4,13 @@ import tensorflow as tf
 
 
 class LayerNormalization(tf.keras.layers.Layer):
-    """Layer that normalize outputs to statistics aggregated across hidden dimension"""
+    """
+    Layer that normalize outputs to statistics aggregated across hidden dimension.
+
+    Args:
+        epsilon: some small number to avoid zero division
+        **kwargs: keyword arguments for base Layer class
+    """
     def __init__(self,
                  epsilon=1e-12,
                  **kwargs) -> None:
@@ -32,11 +38,6 @@ class LayerNormalization(tf.keras.layers.Layer):
         s = tf.math.reduce_mean(tf.math.square(x - u), axis=-1, keepdims=True)
         z = (x - u) / tf.math.sqrt(s + self.eps)
         return self.gamma * z + self.beta
-
-    def compute_mask(self,
-                     inputs: tf.Tensor,
-                     mask: Optional[tf.Tensor] = None) -> Optional[tf.Tensor]:
-        return mask
 
     def compute_output_shape(self, input_shape: tf.TensorShape) -> tf.TensorShape:
         return input_shape

@@ -7,7 +7,6 @@ from .embeddings import AdvancedEmbedding
 from .attention import MultiHeadSelfAttention
 from .activations import gelu
 
-# from .normalization import LayerNormalization
 try:
     from tensorflow.keras.layers import LayerNormalization
 except ImportError:
@@ -15,7 +14,37 @@ except ImportError:
 
 
 class BERT(Network):
-    """BERT body (implemented as a Network subclass in order to have weight-(de)serialization methods."""
+    """
+    BERT body (implemented as a tf.keras Network subclass in order to have weight-(de)serialization methods.
+    All naming of sublayers with trainable variables is performed in order for users to be able to load official
+    checkpoints from Google. All the default parameters for this layer and all sublayers are in accordance with
+    multilingual BERT Base.
+
+    Args:
+        return_stack: by default (None) return pooled output; if False, return a sequence from the last encoder layer
+        vocab_size: size of the token embedding vocabulary
+        token_type_vocab_size: the vocabulary size of `token_type_ids` (or `segment_ids`)
+        sep_token_index: index of separator-token used for calculating `token_type_ids` (or `segment_ids`)
+        pad_token_index: index of the padding token used for mask computation
+        emb_dropout_rate: probability of dropping out layer-normalized embeddings
+        use_one_hot_embeddings: if True, use one-hot method for word embeddings; if False, use
+            `tf.nn.embedding_lookup()`. One hot is better for TPUs.
+        max_len: maximum sequence length that might ever be used with this model. This can be longer than the sequence
+            length of input_tensor, but cannot be shorter.
+        initializer_range: stddev for embedding initialization range (TruncatedNormal initializer is used)
+        trainable_pos_embedding: whether the positional embedding matrix is trainable
+        layer_norm_epsilon: some small number to avoid zero division during layer normalization
+        hidden_size: hidden size of the Transformer (d_model)
+        intermediate_size: the size of the intermediate dense layer
+        num_hidden_layers: number of layers (blocks) in the Transformer
+        num_heads: number of attention heads in the Transformer
+        hidden_dropout_prob: dropout probability for the hidden layers
+        attention_probs_dropout_prob: dropout probability of the attention probabilities
+        intermediate_act_fn: the non-linear activation function to apply to the output of the intermediate dense layer
+        pooler_fc_size: the size of the dense layer on top of the first step of encoder output
+        trainable: whether the layer's variables should be trainable
+        **kwargs: keyword arguments for base Layer class
+    """
     def __init__(self,
                  return_stack: Optional[bool] = None,
                  vocab_size: int = 119547,
@@ -23,8 +52,8 @@ class BERT(Network):
                  sep_token_index: int = 102,
                  pad_token_index: int = 0,
                  emb_dropout_rate: float = 0.1,  # equal to hidden_dropout_prob in the original implementation
-                 max_len: int = 512,
                  use_one_hot_embedding: bool = False,
+                 max_len: int = 512,
                  initializer_range: float = 0.02,
                  trainable_pos_embedding: bool = True,
                  layer_norm_epsilon: float = 1e-12,
@@ -78,7 +107,11 @@ class BERT(Network):
                                                       layer_norm_epsilon=layer_norm_epsilon,
                                                       trainable=trainable,
                                                       name=f'layer_{i}'))
-
+        # The "pooler" converts the encoded sequence tensor of shape [batch_size, seq_length, hidden_size] to a tensor
+        # of shape [batch_size, hidden_size]. This is necessary for segment-level (or segment-pair-level) classification
+        # tasks where we need a fixed dimensional representation of the segment.
+        # We "pool" the model by simply taking the hidden state corresponding to the first token. We assume that this
+        # has been pre-trained
         self.pooler = tf.keras.layers.Dense(pooler_fc_size, activation='tanh', trainable=trainable, name='pooler/dense')
 
     def call(self,
@@ -108,6 +141,20 @@ class BERT(Network):
 
 
 class TransformerBlock(tf.keras.layers.Layer):
+    """
+    One block of transformer architecture.
+
+    Args:
+        hidden_size: hidden size of the Transformer (d_model)
+        intermediate_size: the size of the intermediate dense layer
+        num_heads: number of attention heads in the Transformer
+        hidden_dropout_prob: dropout probability for the hidden layers
+        attention_probs_dropout_prob: dropout probability of the attention probabilities
+        intermediate_act_fn: the non-linear activation function to apply to the output of the intermediate dense layer
+        layer_norm_epsilon: some small number to avoid zero division during layer normalization
+        trainable: whether the layer's variables should be trainable
+        **kwargs: keyword arguments for base Layer class
+    """
     def __init__(self,
                  hidden_size: int = 768,
                  intermediate_size: int = 3072,
@@ -127,20 +174,25 @@ class TransformerBlock(tf.keras.layers.Layer):
                                            attention_probs_dropout_prob=attention_probs_dropout_prob,
                                            trainable=trainable,
                                            name='attention')
-
-        self.dense = tf.keras.layers.Dense(units=hidden_size, name='attention/output/dense')
+        # Run a linear projection of `hidden_size` then add a residual with `layer_input`.
+        self.dense = tf.keras.layers.Dense(units=hidden_size, trainable=trainable, name='attention/output/dense')
 
         self.dropout1 = tf.keras.layers.Dropout(rate=hidden_dropout_prob, name='attention/output/dropout')
-        self.layernorm1 = LayerNormalization(epsilon=layer_norm_epsilon, name='attention/output/LayerNorm')
+        self.layernorm1 = LayerNormalization(epsilon=layer_norm_epsilon,
+                                             trainable=trainable,
+                                             name='attention/output/LayerNorm')
 
-        # point-wise feed forward network
+        # Point-wise Feed Forward network
+        # The activation is only applied to the "intermediate" hidden layer.
         self.pff1 = tf.keras.layers.Dense(units=intermediate_size,
                                           activation=intermediate_act_fn,
+                                          trainable=trainable,
                                           name='intermediate/dense')
-        self.pff2 = tf.keras.layers.Dense(units=hidden_size, name='output/dense')
+        # Down-project back to `hidden_size` then add the residual.
+        self.pff2 = tf.keras.layers.Dense(units=hidden_size, trainable=trainable, name='output/dense')
 
         self.dropout2 = tf.keras.layers.Dropout(rate=hidden_dropout_prob)
-        self.layernorm2 = LayerNormalization(epsilon=layer_norm_epsilon, name='output/LayerNorm')
+        self.layernorm2 = LayerNormalization(epsilon=layer_norm_epsilon, trainable=trainable, name='output/LayerNorm')
 
     def call(self,
              inputs: tf.Tensor,
@@ -156,13 +208,9 @@ class TransformerBlock(tf.keras.layers.Layer):
         ffn_output = self.dropout2(ffn_output, training=training)
         out2 = self.layernorm2(out1 + ffn_output)
 
-        out2._keras_mask = mask  # workaround for mask propagation  # TODO: investigate self.supports_masking usage
+        # workaround for mask propagation
+        out2._keras_mask = mask  # TODO: try to get rid of this. This even could not be moved to self-attention layer.
         return out2
 
-    def compute_mask(self,
-                     inputs: tf.Tensor,
-                     mask: Optional[tf.Tensor] = None) -> Optional[tf.Tensor]:
-        return mask
-
-    def compute_output_shape(self, input_shape):
+    def compute_output_shape(self, input_shape: tf.TensorShape) -> tf.TensorShape:
         return input_shape

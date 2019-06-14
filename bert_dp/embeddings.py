@@ -1,14 +1,33 @@
-from typing import Optional
+from typing import Optional, Union, Sequence
 
 import tensorflow as tf
 from tensorflow.python.eager import context
 from tensorflow.python.keras.utils import tf_utils
-from tensorflow.python.framework import ops
+from tensorflow.python.framework import ops, tensor_shape
 from tensorflow.python.ops import embedding_ops
 
 
 class AdvancedEmbedding(tf.keras.layers.Layer):
-    """Calculate token type ids and return the sum of subword-token, positional end token-type embeddings."""
+    """
+    Calculate token type ids and return the sum of subword-token, positional end token-type embeddings.
+
+    Args:
+        vocab_size: size of the token embedding vocabulary
+        token_type_vocab_size: the vocabulary size of `token_type_ids` (or `segment_ids`)
+        sep_token_index: index of separator-token used for calculating `token_type_ids` (or `segment_ids`)
+        output_dim: width of the word embeddings
+        use_one_hot_embeddings: if True, use one-hot method for word embeddings; if False, use
+            `tf.nn.embedding_lookup()`. One hot is better for TPUs.
+        max_len: maximum sequence length that might ever be used with this model. This can be longer than the sequence
+            length of input_tensor, but cannot be shorter.
+        initializer_range: stddev for embedding initialization range (TruncatedNormal initializer is used)
+        trainable_pos_embedding: whether the positional embedding matrix is trainable
+        **kwargs: keyword arguments for base Layer class
+
+    Note:
+        `token_type_ids` (or `segment_ids`) are calculated on the fly, and user of this layer is responsible
+        for token_type_vocab_size to be enough to deal with the inputs
+    """
     # TODO: maybe break down this class into the three distinct
     def __init__(self,
                  vocab_size: int = 119547,
@@ -33,7 +52,7 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
         self.supports_masking = True
 
     @tf_utils.shape_type_conversion
-    def build(self, batch_input_shape):
+    def build(self, batch_input_shape: Union[Sequence[int], tf.TensorShape]) -> None:
         # Note: most sparse optimizers do not have GPU kernels defined. When
         # building graphs, the placement algorithm is able to place variables on CPU
         # since it knows all kernels using the variable only exist on CPU.
@@ -47,7 +66,7 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
             self._create_weights(batch_input_shape)
         self.built = True
 
-    def _create_weights(self, batch_input_shape):
+    def _create_weights(self, batch_input_shape: Union[Sequence[int], tf.TensorShape]) -> None:
 
         self.token_emb_table = self.add_weight(shape=(self.vocab_size, self.output_dim),
                                                dtype=tf.float32,
@@ -104,10 +123,7 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
 
         return token_emb + pos_emb + segment_emb
 
-    def compute_mask(self,
-                     inputs: tf.Tensor,
-                     mask: Optional[tf.Tensor] = None) -> Optional[tf.Tensor]:
-        return mask
-
-    def compute_output_shape(self, input_shape):
-        return input_shape[0], input_shape[1], self.output_dim
+    def compute_output_shape(self, input_shape: Union[Sequence[int], tf.TensorShape]) -> tf.TensorShape:
+        input_shape = tensor_shape.TensorShape(input_shape)
+        input_shape = input_shape.with_rank_at_least(2)
+        return input_shape.concatenate(self.output_dim)

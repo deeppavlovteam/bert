@@ -4,12 +4,23 @@ import tensorflow as tf
 
 
 class MultiHeadSelfAttention(tf.keras.layers.Layer):
-    """Simplified version of multi-head attention. It uses just input mask (if provided) to calculate attention mask."""
+    """
+    Simplified version of multi-head attention. It uses just input mask (if provided) to calculate attention mask.
+
+    Args:
+          hidden_size:
+          num_heads: number of attention heads
+          neg_inf: some number close to -infinity to add to logits in order to mask corresponding values
+          attention_probs_dropout_prob: dropout probability of the attention probabilities.
+          trainable: whether the layer's variables should be trainable
+          **kwargs: keyword arguments for base Layer class
+    """
     def __init__(self,
                  hidden_size: int = 768,
                  num_heads: int = 12,
                  neg_inf: float = -10000.0,
                  attention_probs_dropout_prob: float = 0.1,
+                 trainable: bool = True,
                  **kwargs) -> None:
         super().__init__(**kwargs)
 
@@ -23,13 +34,14 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
 
         self.depth = hidden_size // self.num_heads
 
-        self.wq = tf.keras.layers.Dense(hidden_size, name='self/query')
-        self.wk = tf.keras.layers.Dense(hidden_size, name='self/key')
-        self.wv = tf.keras.layers.Dense(hidden_size, name='self/value')
+        self.wq = tf.keras.layers.Dense(hidden_size, trainable=trainable, name='self/query')
+        self.wk = tf.keras.layers.Dense(hidden_size, trainable=trainable, name='self/key')
+        self.wv = tf.keras.layers.Dense(hidden_size, trainable=trainable, name='self/value')
         self.dropout = tf.keras.layers.Dropout(rate=attention_probs_dropout_prob)
 
-    def split_heads(self, x, batch_size):
-        """Split the last dimension into (num_heads, depth).
+    def split_heads(self, x: tf.Tensor, batch_size: tf.Tensor) -> tf.Tensor:
+        """
+        Split the last dimension into (num_heads, depth).
         Transpose the result such that the shape is (batch_size, num_heads, seq_len, depth)
         """
         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
@@ -63,8 +75,8 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
 
         # add the mask to the scaled tensor
         if mask is not None:
-            mask = tf.cast(mask, tf.float32)[:, tf.newaxis, tf.newaxis, :]
-            scaled_attention_logits += ((1.0 - mask) * self.neg_inf)
+            attention_mask = tf.cast(mask, tf.float32)[:, tf.newaxis, tf.newaxis, :]
+            scaled_attention_logits += ((1.0 - attention_mask) * self.neg_inf)
 
         # Normalize the attention scores to probabilities
         attention_weights = tf.nn.softmax(scaled_attention_logits)
@@ -76,11 +88,6 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
         concat_attention = tf.reshape(scaled_attention, (batch_size, -1, self.hidden_size))
 
         return concat_attention
-
-    def compute_mask(self,
-                     inputs: tf.Tensor,
-                     mask: Optional[tf.Tensor] = None) -> Optional[tf.Tensor]:
-        return mask
 
     def compute_output_shape(self, input_shape: tf.TensorShape) -> tf.TensorShape:
         return input_shape
