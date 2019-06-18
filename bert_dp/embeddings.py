@@ -28,7 +28,7 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
         `token_type_ids` (or `segment_ids`) are calculated on the fly, and user of this layer is responsible
         for token_type_vocab_size to be enough to deal with the inputs
     """
-    # TODO: maybe break down this class into the three distinct
+    # TODO: maybe break down this class into three distinct ones
     def __init__(self,
                  vocab_size: int = 119547,
                  token_type_vocab_size: int = 2,
