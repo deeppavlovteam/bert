@@ -1,3 +1,17 @@
+# Copyright 2017 Neural Networks and Deep Learning lab, MIPT
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import Optional
 
 import tensorflow as tf
@@ -8,7 +22,7 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
     Simplified version of multi-head attention. It uses just input mask (if provided) to calculate attention mask.
 
     Args:
-          hidden_size:
+          hidden_size: hidden size of the Transformer (d_model)
           num_heads: number of attention heads
           neg_inf: some number close to -infinity to add to logits in order to mask corresponding values
           attention_probs_dropout_prob: dropout probability of the attention probabilities.
