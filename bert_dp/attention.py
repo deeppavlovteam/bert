@@ -5,7 +5,7 @@ import tensorflow as tf
 
 class MultiHeadSelfAttention(tf.keras.layers.Layer):
     """
-    Simplified version of multi-head attention. It uses just input mask (if provided) to calculate attention mask.
+    Simplified version of multi-head attention. It uses just an input mask (if provided) to calculate attention mask.
 
     Args:
           hidden_size:
