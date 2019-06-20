@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Union, Sequence
+from typing import Union, Sequence
 
 import tensorflow as tf
 from tensorflow.python.eager import context
@@ -103,8 +103,6 @@ class AdvancedEmbedding(tf.keras.layers.Layer):
 
     def call(self,
              token_ids: tf.Tensor,
-             training: Optional[bool] = None,
-             mask: Optional[tf.Tensor] = None,
              **kwargs) -> tf.Tensor:
 
         token_emb = embedding_ops.embedding_lookup(self.token_emb_table, tf.cast(token_ids, tf.int32))

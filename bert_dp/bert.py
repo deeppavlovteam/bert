@@ -15,7 +15,6 @@
 from typing import Optional, Union
 
 import tensorflow as tf
-from tensorflow.python.keras.engine.network import Network
 
 from .embeddings import AdvancedEmbedding
 from .attention import MultiHeadSelfAttention
@@ -28,9 +27,11 @@ except ImportError:
     from .normalization import LayerNormalization
 
 
-class BERT(Network):
+class BERT(tf.keras.Model):
     """
-    BERT body (implemented as a tf.keras Network subclass in order to have weight-(de)serialization methods.
+    BERT body (could be also implemented as a tensorflow.python.keras.engine.network.Network subclass in order to have
+    just weight-(de)serialization methods). Higher level models (e.g. classifiers or taggers) could be implemented as a
+    child of this class, rather than incorporate it as a building block.
     All naming of sublayers with trainable variables is performed in order for users to be able to load official
     checkpoints from Google. All the default parameters for this layer and all sublayers are in accordance with
     multilingual BERT Base.

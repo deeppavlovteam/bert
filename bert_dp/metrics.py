@@ -1,57 +1,177 @@
-import types
-
 import numpy as np
 import tensorflow as tf
-from tensorflow.python.ops import init_ops
-from tensorflow.python.ops import math_ops
-from tensorflow.python.keras.utils import metrics_utils
 from tensorflow.python.keras.metrics import Metric
 
 
-class SparseBinaryF1Score(Metric):
+class F1Score(Metric):
+    """Calculates F1 micro, macro or weighted based on the user's choice.
+    F1 score is the weighted average of precision and
+    recall. Output range is [0, 1]. This works for both
+    multi-class and multi-label classification.
+    Args:
+       num_classes : Number of unique classes in the dataset.
+       average : Type of averaging to be performed on data.
+                 Acceptable values are None, micro, macro and
+                 weighted.
+                 Default value is None.
+    Returns:
+       F1 score: float
+    Raises:
+       ValueError: If the `average` has values other than
+       [None, micro, macro. weighted].
+    `average` parameter behavior:
+    1. If `None` is specified as an input, scores for each
+       class are returned.
+    2. If `micro` is specified, metrics like true positivies,
+       false positives and false negatives are computed
+       globally.
+    3. If `macro` is specified, metrics like true positivies,
+       false positives and false negatives are computed for
+       each class and their unweighted mean is returned.
+       Imbalance in dataset is not taken into account for
+       calculating the score
+    4. If `weighted` is specified, metrics are computed for
+       each class and returns the mean weighted by the
+       number of true instances in each class taking data
+       imbalance into account.
+    Usage:
+    ```python
+    actuals = tf.constant([[1, 1, 0],[1, 0, 0]],
+              dtype=tf.int32)
+    preds = tf.constant([[1, 0, 0],[1, 0, 1]],
+            dtype=tf.int32)
+    output = tf.keras.metrics.F1Score(num_classes=3,
+              average='micro')
+    output.update_state(actuals, predictions)
+    print('F1 Micro score is: ',
+            output.result().numpy()) # 0.6666667
+    ```
+    """
 
-    def __new__(cls, *args, **kwargs):
-        # don't look at this
-        obj = super(Metric, cls).__new__(cls)
-        update_state_fn = obj.update_state
-        obj.update_state = types.MethodType(metrics_utils.update_state_wrapper(update_state_fn), obj)
-        obj.result = types.MethodType(metrics_utils.result_wrapper(obj.result), obj)
-        return obj
+    def __init__(self,
+                 num_classes,
+                 average=None,
+                 name='f1_score',
+                 dtype=tf.float32):
+        super(F1Score, self).__init__(name=name)
+        self.num_classes = num_classes
+        if average not in (None, 'micro', 'macro', 'weighted'):
+            raise ValueError("Unknown average type. Acceptable values "
+                             "are: [micro, macro, weighted]")
+        else:
+            self.average = average
+            if self.average == 'micro':
+                self.axis = None
+            else:
+                self.axis = 0
+        if self.average == 'micro':
+            self.true_positives = self.add_weight(
+                'true_positives',
+                shape=[],
+                initializer='zeros',
+                dtype=tf.float32)
+            self.false_positives = self.add_weight(
+                'false_positives',
+                shape=[],
+                initializer='zeros',
+                dtype=tf.float32)
+            self.false_negatives = self.add_weight(
+                'false_negatives',
+                shape=[],
+                initializer='zeros',
+                dtype=tf.float32)
+        else:
+            self.true_positives = self.add_weight(
+                'true_positives',
+                shape=[self.num_classes],
+                initializer='zeros',
+                dtype=tf.float32)
+            self.false_positives = self.add_weight(
+                'false_positives',
+                shape=[self.num_classes],
+                initializer='zeros',
+                dtype=tf.float32)
+            self.false_negatives = self.add_weight(
+                'false_negatives',
+                shape=[self.num_classes],
+                initializer='zeros',
+                dtype=tf.float32)
+            self.weights_intermediate = self.add_weight(
+                'weights',
+                shape=[self.num_classes],
+                initializer='zeros',
+                dtype=tf.float32)
 
-    def __init__(self):
+    def update_state(self, y_true, y_pred, sample_weight=None):  # !
+        y_true = tf.cast(y_true, tf.int32)
+        y_pred = tf.cast(y_pred > 0.5, tf.int32)  # BUG: previously was tf.cast(y_pred, tf.int32)
 
-        super(SparseBinaryF1Score, self).__init__()
-
-        default_threshold = 0.5
-        self.thresholds = metrics_utils.parse_init_thresholds(None, default_threshold=default_threshold)
-        self.tp = self.add_weight('true_positives',
-                                  shape=(1,),
-                                  initializer=init_ops.zeros_initializer)
-        self.fp = self.add_weight('false_positives',
-                                  shape=(1,),
-                                  initializer=init_ops.zeros_initializer)
-        self.fn = self.add_weight('false_negatives',
-                                  shape=(1,),
-                                  initializer=init_ops.zeros_initializer)
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        y_pred_ = tf.math.reduce_max(y_pred, axis=-1, keepdims=True)
-        return metrics_utils.update_confusion_matrix_variables(
-            {
-                metrics_utils.ConfusionMatrix.TRUE_POSITIVES: self.tp,
-                metrics_utils.ConfusionMatrix.FALSE_POSITIVES: self.fp,
-                metrics_utils.ConfusionMatrix.FALSE_NEGATIVES: self.fn
-            },
-            y_true,
-            y_pred_,
-            thresholds=self.thresholds,
-            top_k=None,
-            class_id=None,
-            sample_weight=sample_weight)
+        # true positive
+        self.true_positives.assign_add(
+            tf.cast(
+                tf.math.count_nonzero(y_pred * y_true, axis=self.axis),
+                tf.float32))
+        # false positive
+        self.false_positives.assign_add(
+            tf.cast(
+                tf.math.count_nonzero(y_pred * (y_true - 1), axis=self.axis),
+                tf.float32))
+        # false negative
+        self.false_negatives.assign_add(
+            tf.cast(
+                tf.math.count_nonzero((y_pred - 1) * y_true, axis=self.axis),
+                tf.float32))
+        if self.average == 'weighted':
+            # variable to hold intermediate weights
+            self.weights_intermediate.assign_add(
+                tf.cast(tf.reduce_sum(y_true, axis=self.axis), tf.float32))
 
     def result(self):
-        result = math_ops.div_no_nan(2 * self.tp, (2 * self.tp + self.fp + self.fn))
-        return result[0]
+        p_sum = tf.cast(self.true_positives + self.false_positives, tf.float32)
+        # calculate precision
+        precision = tf.math.divide_no_nan(self.true_positives, p_sum)
+
+        r_sum = tf.cast(self.true_positives + self.false_negatives, tf.float32)
+        # calculate recall
+        recall = tf.math.divide_no_nan(self.true_positives, r_sum)
+
+        mul_value = 2 * precision * recall
+        add_value = precision + recall
+        f1_int = tf.math.divide_no_nan(mul_value, add_value)
+        # f1 score
+        if self.average is not None:
+            f1_score = tf.reduce_mean(f1_int)
+        else:
+            f1_score = f1_int
+        # condition for weighted f1 score
+        if self.average == 'weighted':
+            f1_int_weights = tf.math.divide_no_nan(
+                self.weights_intermediate,
+                tf.reduce_sum(self.weights_intermediate))
+            # weighted f1 score calculation
+            f1_score = tf.reduce_sum(f1_int * f1_int_weights)
+
+        return f1_score
+
+    def get_config(self):
+        """Returns the serializable config of the metric."""
+
+        config = {
+            "num_classes": self.num_classes,
+            "average": self.average,
+        }
+        base_config = super(F1Score, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
 
     def reset_states(self):
-        tf.keras.backend.batch_set_value([(v, np.zeros((1,))) for v in self.variables])
+        # reset state of the variables to zero
+        if self.average == 'micro':
+            self.true_positives.assign(0)
+            self.false_positives.assign(0)
+            self.false_negatives.assign(0)
+        else:
+            self.true_positives.assign(np.zeros(self.num_classes), np.float32)
+            self.false_positives.assign(np.zeros(self.num_classes), np.float32)
+            self.false_negatives.assign(np.zeros(self.num_classes), np.float32)
+            self.weights_intermediate.assign(
+                np.zeros(self.num_classes), np.float32)
