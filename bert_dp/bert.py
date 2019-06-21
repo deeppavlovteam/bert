@@ -37,7 +37,8 @@ class BERT(tf.keras.Model):
     multilingual BERT Base.
 
     Args:
-        return_stack: by default (None) return pooled output; if False, return a sequence from the last encoder layer
+        return_stack: by default (None) return pooled output; if False, return a sequence from the last encoder layer;
+            if True, return collection of sequence outputs from all encoder layers
         vocab_size: size of the token embedding vocabulary
         token_type_vocab_size: the vocabulary size of `token_type_ids` (or `segment_ids`)
         sep_token_index: index of separator-token used for calculating `token_type_ids` (or `segment_ids`)

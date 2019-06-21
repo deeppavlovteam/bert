@@ -104,7 +104,7 @@ class F1Score(Metric):
 
     def update_state(self, y_true, y_pred, sample_weight=None):  # !
         y_true = tf.cast(y_true, tf.int32)
-        y_pred = tf.cast(y_pred > 0.5, tf.int32)  # BUG: previously was tf.cast(y_pred, tf.int32)
+        y_pred = tf.cast(tf.round(y_pred), tf.int32)  # BUG: previously was tf.cast(y_pred, tf.int32)
 
         # true positive
         self.true_positives.assign_add(
@@ -141,6 +141,8 @@ class F1Score(Metric):
         # f1 score
         if self.average is not None:
             f1_score = tf.reduce_mean(f1_int)
+        elif self.num_classes == 2:
+            f1_score = f1_int[-1]
         else:
             f1_score = f1_int
         # condition for weighted f1 score
