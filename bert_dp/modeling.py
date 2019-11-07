@@ -216,7 +216,7 @@ class BertModel(object):
                     initializer_range=config.initializer_range,
                     word_embedding_name="word_embeddings",
                     use_one_hot_embeddings=use_one_hot_embeddings)
-            self.embedding_output = tf.concat([memory, self.embedding_output], concat_dim=1)
+            self.embedding_output = tf.concat([memory, self.embedding_output], axis=1)
 
       with tf.variable_scope("encoder"):
         # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
