@@ -207,9 +207,9 @@ class BertModel(object):
             # 1..num_mem_tokens + 1 will be added to the beginning of
             # each sequence.
             memory_ids = tf.expand_dims(tf.range(num_mem_tokens) + 1, 0)
-            memory_ids = tf.tile(memory_ids, (num_mem_tokens, 1))
+            memory_ids = tf.tile(memory_ids, (batch_size, 1))
             with tf.variable_scope('', reuse=tf.AUTO_REUSE):
-                memory = embedding_lookup(
+                memory, _ = embedding_lookup(
                     input_ids=memory_ids,
                     vocab_size=config.vocab_size,
                     embedding_size=config.hidden_size,
