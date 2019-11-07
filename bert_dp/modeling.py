@@ -173,6 +173,17 @@ class BertModel(object):
     if input_mask is None:
       input_mask = tf.ones(shape=[batch_size, seq_length], dtype=tf.int32)
 
+    if num_mem_tokens > 0:
+        # Add [MEM] tokens. Tokens with numbers 1..num_mem_tokens + 1
+        # are assumed to be [UNUSED]. Tokens with numbers
+        # 1..num_mem_tokens + 1 will be added to the beginning of
+        # each sequence.
+        memory_ids = tf.expand_dims(tf.range(num_mem_tokens) + 1, 0)
+        memory_ids = tf.tile(memory_ids, (batch_size, 1))
+        input_ids = tf.concat([memory_ids, input_ids], axis=1)
+        input_mask = tf.concat([tf.ones([batch_size, num_mem_tokens], dtype=tf.int32), input_mask], axis=1)
+        seq_length += num_mem_tokens
+
     if token_type_ids is None:
       token_type_ids = tf.zeros(shape=[batch_size, seq_length], dtype=tf.int32)
 
@@ -200,24 +211,6 @@ class BertModel(object):
             initializer_range=config.initializer_range,
             max_position_embeddings=config.max_position_embeddings,
             dropout_prob=hidden_dropout_prob)
-
-        if num_mem_tokens > 0:
-            # Add [MEM] tokens. Tokens with numbers 1..num_mem_tokens + 1
-            # are assumed to be [UNUSED]. Tokens with numbers
-            # 1..num_mem_tokens + 1 will be added to the beginning of
-            # each sequence.
-            memory_ids = tf.expand_dims(tf.range(num_mem_tokens) + 1, 0)
-            memory_ids = tf.tile(memory_ids, (batch_size, 1))
-            with tf.variable_scope('', reuse=tf.AUTO_REUSE):
-                memory, _ = embedding_lookup(
-                    input_ids=memory_ids,
-                    vocab_size=config.vocab_size,
-                    embedding_size=config.hidden_size,
-                    initializer_range=config.initializer_range,
-                    word_embedding_name="word_embeddings",
-                    use_one_hot_embeddings=use_one_hot_embeddings)
-            self.embedding_output = tf.concat([memory, self.embedding_output], axis=1)
-            input_mask = tf.concat([tf.ones([batch_size, num_mem_tokens], dtype=tf.int32), input_mask], axis=1)
 
       with tf.variable_scope("encoder"):
         # This converts a 2D mask of shape [batch_size, seq_length] to a 3D
