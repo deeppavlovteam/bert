@@ -208,13 +208,14 @@ class BertModel(object):
             # each sequence.
             memory_ids = tf.expand_dims(tf.range(num_mem_tokens) + 1, 0)
             memory_ids = tf.tile(memory_ids, (num_mem_tokens, 1))
-            memory = embedding_lookup(
-                input_ids=memory_ids,
-                vocab_size=config.vocab_size,
-                embedding_size=config.hidden_size,
-                initializer_range=config.initializer_range,
-                word_embedding_name="word_embeddings",
-                use_one_hot_embeddings=use_one_hot_embeddings)
+            with tf.variable_scope('', reuse=tf.AUTO_REUSE):
+                memory = embedding_lookup(
+                    input_ids=memory_ids,
+                    vocab_size=config.vocab_size,
+                    embedding_size=config.hidden_size,
+                    initializer_range=config.initializer_range,
+                    word_embedding_name="word_embeddings",
+                    use_one_hot_embeddings=use_one_hot_embeddings)
             self.embedding_output = tf.concat([memory, self.embedding_output], concat_dim=1)
 
       with tf.variable_scope("encoder"):
@@ -436,7 +437,6 @@ def embedding_lookup(input_ids,
   # reshape to [batch_size, seq_length, 1].
   if input_ids.shape.ndims == 2:
     input_ids = tf.expand_dims(input_ids, axis=[-1])
-  # with tf.variable_scope('', reuse=tf.AUTO_REUSE):
   embedding_table = tf.get_variable(
       name=word_embedding_name,
       shape=[vocab_size, embedding_size],
