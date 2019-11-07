@@ -112,11 +112,13 @@ flags.DEFINE_bool("train_token_embeddings", False, "Whether to train token embed
 
 flags.DEFINE_bool("train_positional_embeddings", False, "Whether to train positional embeddings variable.")
 
+flags.DEFINE_integer("num_mem_tokens", 0, "How many extra memory tokens to use")
+
 
 def model_fn_builder(bert_config, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings, train_token_embeddings,
-                     train_positional_embeddings):
+                     train_positional_embeddings, num_mem_tokens):
   """Returns `model_fn` closure for TPUEstimator."""
 
   def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -142,7 +144,8 @@ def model_fn_builder(bert_config, init_checkpoint, learning_rate,
         input_ids=input_ids,
         input_mask=input_mask,
         token_type_ids=segment_ids,
-        use_one_hot_embeddings=use_one_hot_embeddings)
+        use_one_hot_embeddings=use_one_hot_embeddings,
+        num_mem_tokens=num_mem_tokens)
 
     (masked_lm_loss,
      masked_lm_example_loss, masked_lm_log_probs) = get_masked_lm_output(
@@ -505,7 +508,8 @@ def main(_):
       use_tpu=FLAGS.use_tpu,
       use_one_hot_embeddings=FLAGS.use_tpu,
       train_token_embeddings=FLAGS.train_token_embeddings,
-      train_positional_embeddings=FLAGS.train_positional_embeddings)
+      train_positional_embeddings=FLAGS.train_positional_embeddings,
+      num_mem_tokens=FLAGS.num_mem_tokens)
 
   if FLAGS.use_tpu or FLAGS.num_gpus == 1:
     # If TPU is not available, this will fall back to normal Estimator on CPU
