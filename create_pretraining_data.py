@@ -60,8 +60,6 @@ flags.DEFINE_float(
     "Probability of creating sequences which are shorter than the "
     "maximum length.")
 
-flags.DEFINE_integer("num_cls", 1, "Number of CLS tokens at the beginning.")
-
 
 class TrainingInstance(object):
   """A single training instance (sentence pair)."""
@@ -176,7 +174,7 @@ def create_float_feature(values):
 
 def create_training_instances(input_files, tokenizer, max_seq_length,
                               dupe_factor, short_seq_prob, masked_lm_prob,
-                              max_predictions_per_seq, rng, num_cls):
+                              max_predictions_per_seq, rng):
   """Create `TrainingInstance`s from raw text."""
   all_documents = [[]]
 
@@ -212,7 +210,7 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
       instances.extend(
           create_instances_from_document(
               all_documents, document_index, max_seq_length, short_seq_prob,
-              masked_lm_prob, max_predictions_per_seq, vocab_words, rng, num_cls))
+              masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
 
   rng.shuffle(instances)
   return instances
@@ -220,12 +218,12 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
 
 def create_instances_from_document(
     all_documents, document_index, max_seq_length, short_seq_prob,
-    masked_lm_prob, max_predictions_per_seq, vocab_words, rng, num_cls):
+    masked_lm_prob, max_predictions_per_seq, vocab_words, rng):
   """Creates `TrainingInstance`s for a single document."""
   document = all_documents[document_index]
 
-  # Account for [CLS] * num_cls, [SEP], [SEP]
-  max_num_tokens = max_seq_length - 2 - num_cls
+  # Account for [CLS], [SEP], [SEP]
+  max_num_tokens = max_seq_length - 3
 
   # We *usually* want to fill up the entire sequence since we are padding
   # to `max_seq_length` anyways, so short sequences are generally wasted
@@ -426,7 +424,7 @@ def main(_):
   instances = create_training_instances(
       input_files, tokenizer, FLAGS.max_seq_length, FLAGS.dupe_factor,
       FLAGS.short_seq_prob, FLAGS.masked_lm_prob, FLAGS.max_predictions_per_seq,
-      rng, FLAGS.num_cls)
+      rng)
 
   output_files = FLAGS.output_file.split(",")
   tf.logging.info("*** Writing to output files ***")
