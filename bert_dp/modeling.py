@@ -134,6 +134,7 @@ class BertModel(object):
                input_mask=None,
                token_type_ids=None,
                use_one_hot_embeddings=True,
+               additional_features=None,
                scope=None):
     """Constructor for BertModel.
 
@@ -148,6 +149,7 @@ class BertModel(object):
         embeddings or tf.embedding_lookup() for the word embeddings. On the TPU,
         it is much faster if this is True, on the CPU or GPU, it is faster if
         this is False.
+      additional_features: (optional) float32 Tensor of shape [batch_size, seq_length, bert_dim]
       scope: (optional) variable scope. Defaults to "bert".
 
     Raises:
@@ -196,6 +198,7 @@ class BertModel(object):
             token_type_embedding_name="token_type_embeddings",
             use_position_embeddings=True,
             position_embedding_name="position_embeddings",
+            additional_features=additional_features,
             initializer_range=config.initializer_range,
             max_position_embeddings=config.max_position_embeddings,
             dropout_prob=hidden_dropout_prob)
@@ -441,6 +444,7 @@ def embedding_postprocessor(input_tensor,
                             token_type_embedding_name="token_type_embeddings",
                             use_position_embeddings=True,
                             position_embedding_name="position_embeddings",
+                            additional_features=None,
                             initializer_range=0.02,
                             max_position_embeddings=512,
                             dropout_prob=0.1):
@@ -525,6 +529,9 @@ def embedding_postprocessor(input_tensor,
       position_embeddings = tf.reshape(position_embeddings,
                                        position_broadcast_shape)
       output += position_embeddings
+
+  if additional_features is not None:
+    output += additional_features
 
   output = layer_norm_and_dropout(output, dropout_prob)
   return output
